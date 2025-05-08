@@ -6,7 +6,6 @@ from utils.crawl_github_files import crawl_github_files
 from utils.call_llm import call_llm
 from utils.crawl_local_files import crawl_local_files
 
-
 # Helper to get content for specific file indices
 def get_content_for_indices(files_data, indices):
     content_map = {}
@@ -17,7 +16,6 @@ def get_content_for_indices(files_data, indices):
                 content  # Use index + path as key for context
             )
     return content_map
-
 
 class FetchRepo(Node):
     def prep(self, shared):
@@ -61,7 +59,6 @@ class FetchRepo(Node):
             )
         else:
             print(f"Crawling directory: {prep_res['local_dir']}...")
-
             result = crawl_local_files(
                 directory=prep_res["local_dir"],
                 include_patterns=prep_res["include_patterns"],
@@ -73,32 +70,31 @@ class FetchRepo(Node):
         # Convert dict to list of tuples: [(path, content), ...]
         files_list = list(result.get("files", {}).items())
         if len(files_list) == 0:
-            raise (ValueError("Failed to fetch files"))
+            raise(ValueError("Failed to fetch files"))
         print(f"Fetched {len(files_list)} files.")
         return files_list
 
     def post(self, shared, prep_res, exec_res):
-        shared["files"] = exec_res  # List of (path, content) tuples
-
+        shared["files"] = exec_res # List of (path, content) tuples
 
 class IdentifyAbstractions(Node):
     def prep(self, shared):
         files_data = shared["files"]
         project_name = shared["project_name"]  # Get project name
-        language = shared.get("language", "english")  # Get language
-        use_cache = shared.get("use_cache", True)  # Get use_cache flag, default to True
+        language = shared.get("language", "english") # Get language
+        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to True
         max_abstraction_num = shared.get("max_abstraction_num", 10)  # Get max_abstraction_num, default to 10
 
         # Helper to create context from files, respecting limits (basic example)
         def create_llm_context(files_data):
             context = ""
-            file_info = []  # Store tuples of (index, path)
+            file_info = [] # Store tuples of (index, path)
             for i, (path, content) in enumerate(files_data):
                 entry = f"--- File Index {i}: {path} ---\n{content}\n\n"
                 context += entry
                 file_info.append((i, path))
 
-            return context, file_info  # file_info is list of (index, path)
+            return context, file_info # file_info is list of (index, path)
 
         context, file_info = create_llm_context(files_data)
         # Format file info for the prompt (comment is just a hint for LLM)
@@ -144,11 +140,11 @@ Codebase Context:
 {context}
 
 {language_instruction}Analyze the codebase context.
-Identify the top 5-{max_abstraction_num} core most important abstractions to help those new to the codebase.
+Identify the complete and comprehensive core most important abstractions to help those new to the codebase.
 
 For each abstraction, provide:
 1. A concise `name`{name_lang_hint}.
-2. A beginner-friendly `description` explaining what it is with a simple analogy, in around 100 words{desc_lang_hint}.
+2. A "technical" and "computer science" centric `description` explaining what it is with a real-world and practical analogy, in atleast 100 words or more if required{desc_lang_hint}.
 3. A list of relevant `file_indices` (integers) using the format `idx # path/comment`.
 
 List of file indices and paths present in the context:
@@ -171,7 +167,7 @@ Format the output as a YAML list of dictionaries:
     Another core concept, similar to a blueprint for objects.{desc_lang_hint}
   file_indices:
     - 5 # path/to/another.js
-# ... up to {max_abstraction_num} abstractions
+# ... up to maximum number of complete and comprehensive core most important abstractions
 ```"""
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0))  # Use cache only if enabled and not retrying
 
@@ -245,7 +241,7 @@ class AnalyzeRelationships(Node):
         files_data = shared["files"]
         project_name = shared["project_name"]  # Get project name
         language = shared.get("language", "english")  # Get language
-        use_cache = shared.get("use_cache", True)  # Get use_cache flag, default to True
+        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to True
 
         # Get the actual number of abstractions directly
         num_abstractions = len(abstractions)
@@ -316,13 +312,13 @@ Context (Abstractions, Descriptions, Code):
 {context}
 
 {language_instruction}Please provide:
-1. A high-level `summary` of the project's main purpose and functionality in a few beginner-friendly sentences{lang_hint}. Use markdown formatting with **bold** and *italic* text to highlight important concepts.
+1. A high-level `summary` of the project's main purpose and functionality in a short "technical" and "computer science" friendly sentences{lang_hint}. Use markdown formatting with **bold** and *italic* text to highlight important concepts.
 2. A list (`relationships`) describing the key interactions between these abstractions. For each relationship, specify:
     - `from_abstraction`: Index of the source abstraction (e.g., `0 # AbstractionName1`)
     - `to_abstraction`: Index of the target abstraction (e.g., `1 # AbstractionName2`)
     - `label`: A brief label for the interaction **in just a few words**{lang_hint} (e.g., "Manages", "Inherits", "Uses").
     Ideally the relationship should be backed by one abstraction calling or passing parameters to another.
-    Simplify the relationship and exclude those non-important ones.
+    Make the relationship Simple but don't dilute it while doing so and exclude those non-important ones.
 
 IMPORTANT: Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target). Each abstraction index must appear at least once across all relationships.
 
@@ -401,11 +397,11 @@ Now, provide the YAML output:
             "details": validated_relationships,  # Store validated, index-based relationships with potentially translated labels
         }
 
+
     def post(self, shared, prep_res, exec_res):
         # Structure is now {"summary": str, "details": [{"from": int, "to": int, "label": str}]}
         # Summary and label might be translated
         shared["relationships"] = exec_res
-
 
 class OrderChapters(Node):
     def prep(self, shared):
@@ -413,7 +409,7 @@ class OrderChapters(Node):
         relationships = shared["relationships"]  # Summary/label might be translated
         project_name = shared["project_name"]  # Get project name
         language = shared.get("language", "english")  # Get language
-        use_cache = shared.get("use_cache", True)  # Get use_cache flag, default to True
+        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to True
 
         # Prepare context for the LLM
         abstraction_info_for_prompt = []
@@ -543,7 +539,7 @@ class WriteChapters(BatchNode):
         files_data = shared["files"]  # List of (path, content) tuples
         project_name = shared["project_name"]
         language = shared.get("language", "english")
-        use_cache = shared.get("use_cache", True)  # Get use_cache flag, default to True
+        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to True
 
         # Get already written chapters to provide context
         # We store them temporarily during the batch run, not in shared memory yet
@@ -638,7 +634,7 @@ class WriteChapters(BatchNode):
         chapter_num = item["chapter_num"]
         project_name = item.get("project_name")
         language = item.get("language", "english")
-        use_cache = item.get("use_cache", True) # Read use_cache from item
+        use_cache = item.get("use_cache", False) # Read use_cache from item
         print(f"Writing chapter {chapter_num} for: {abstraction_name} using LLM...")
 
         # Prepare file context string from the map
@@ -675,8 +671,9 @@ class WriteChapters(BatchNode):
             )
             tone_note = f" (appropriate for {lang_cap} readers)"
 
+
         prompt = f"""
-{language_instruction}Write a very beginner-friendly tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
+{language_instruction}Write a software developer friendly tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
 
 Concept Details{concept_details_note}:
 - Name: {abstraction_name}
@@ -697,31 +694,31 @@ Instructions for the chapter (Generate content in {language.capitalize()} unless
 
 - If this is not the first chapter, begin with a brief transition from the previous chapter{instruction_lang_note}, referencing it with a proper Markdown link using its name{link_lang_note}.
 
-- Begin with a high-level motivation explaining what problem this abstraction solves{instruction_lang_note}. Start with a central use case as a concrete example. The whole chapter should guide the reader to understand how to solve this use case. Make it very minimal and friendly to beginners.
+- Begin with a high-level motivation explaining what problem this abstraction solves{instruction_lang_note}. Start with a central use case as a concrete example. The whole chapter should guide the reader to understand how to solve this use case. Make it very comprehensive and very understandable to a Senior Software Developer.
 
 - If the abstraction is complex, break it down into key concepts. Explain each concept one-by-one in a very beginner-friendly way{instruction_lang_note}.
 
 - Explain how to use this abstraction to solve the use case{instruction_lang_note}. Give example inputs and outputs for code snippets (if the output isn't values, describe at a high level what will happen{instruction_lang_note}).
 
-- Each code block should be BELOW 10 lines! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Aggresively simplify the code to make it minimal. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a beginner friendly explanation right after it{instruction_lang_note}.
+- Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}.
 
-- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequenceDiagram with a dummy example - keep it minimal with at most 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. {mermaid_lang_note}.
+- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequenceDiagram with a dummy example - keep it minimal with atleast 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. {mermaid_lang_note}.
 
-- Then dive deeper into code for the internal implementation with references to files. Provide example code blocks, but make them similarly simple and beginner-friendly. Explain{instruction_lang_note}.
+- Then dive deeper into code for the internal implementation with references to files. Provide example code blocks, but make them similarly simple however don't dilute it, and "Computer Science"-friendly. Explain{instruction_lang_note}.
 
 - IMPORTANT: When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
 
 - Use mermaid diagrams to illustrate complex concepts (```mermaid``` format). {mermaid_lang_note}.
 
-- Heavily use analogies and examples throughout{instruction_lang_note} to help beginners understand.
+- Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand.
 
 - End the chapter with a brief conclusion that summarizes what was learned{instruction_lang_note} and provides a transition to the next chapter{instruction_lang_note}. If there is a next chapter, use a proper Markdown link: [Next Chapter Title](next_chapter_filename){link_lang_note}.
 
-- Ensure the tone is welcoming and easy for a newcomer to understand{tone_note}.
+- Ensure the tone is welcoming and easy for a seasoned sofware developer professional to understand{tone_note}.
 
 - Output *only* the Markdown content for this chapter.
 
-Now, directly provide a super beginner-friendly Markdown output (DON'T need ```markdown``` tags):
+Now, directly provide a "technical" and "Computer Science"-friendly Markdown output (DON'T need ```markdown``` tags):
 """
         chapter_content = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
         # Basic validation/cleanup
@@ -740,7 +737,7 @@ Now, directly provide a super beginner-friendly Markdown output (DON'T need ```m
         # Add the generated content to our temporary list for the next iteration's context
         self.chapters_written_so_far.append(chapter_content)
 
-        return chapter_content  # Return the Markdown string (potentially translated)
+        return chapter_content # Return the Markdown string (potentially translated)
 
     def post(self, shared, prep_res, exec_res_list):
         # exec_res_list contains the generated Markdown for each chapter, in order
@@ -749,11 +746,10 @@ Now, directly provide a super beginner-friendly Markdown output (DON'T need ```m
         del self.chapters_written_so_far
         print(f"Finished writing {len(exec_res_list)} chapters.")
 
-
 class CombineTutorial(Node):
     def prep(self, shared):
         project_name = shared["project_name"]
-        output_base_dir = shared.get("output_dir", "output")  # Default output dir
+        output_base_dir = shared.get("output_dir", "output") # Default output dir
         output_path = os.path.join(output_base_dir, project_name)
         repo_url = shared.get("repo_url")  # Get the repository URL
         # language = shared.get("language", "english") # No longer needed for fixed strings
@@ -801,7 +797,7 @@ class CombineTutorial(Node):
 
         # --- Prepare index.md content ---
         index_content = f"# Tutorial: {project_name}\n\n"
-        index_content += f"{relationships_data['summary']}\n\n"  # Use the potentially translated summary directly
+        index_content += f"{relationships_data['summary']}\n\n" # Use the potentially translated summary directly
         # Keep fixed strings in English
         index_content += f"**Source Repository:** [{repo_url}]({repo_url})\n\n"
 
@@ -873,8 +869,9 @@ class CombineTutorial(Node):
                 f.write(chapter_info["content"])
             print(f"  - Wrote {chapter_filepath}")
 
-        return output_path  # Return the final path
+        return output_path # Return the final path
+
 
     def post(self, shared, prep_res, exec_res):
-        shared["final_output_dir"] = exec_res  # Store the output path
+        shared["final_output_dir"] = exec_res # Store the output path
         print(f"\nTutorial generation complete! Files are in: {exec_res}")
