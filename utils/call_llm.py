@@ -24,7 +24,7 @@ logger.addHandler(file_handler)
 cache_file = "llm_cache.json"
 
 
-def call_llm(prompt: str, use_cache: bool = True) -> str:
+def call_llm(prompt: str, use_cache: bool = False) -> str:
     # Log the prompt
     logger.info(f"PROMPT: {prompt}")
 
@@ -103,7 +103,7 @@ def _call_groq(prompt: str) -> str:
 
 
 # Use OpenRouter API
-# def call_llm(prompt: str, use_cache: bool = True) -> str:
+# def call_llm(prompt: str, use_cache: bool = False) -> str:
 #     # Log the prompt
 #     logger.info(f"PROMPT: {prompt}")
 
