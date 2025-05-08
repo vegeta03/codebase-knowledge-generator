@@ -79,27 +79,49 @@ def _call_groq(prompt: str) -> str:
     Call the Groq LLM API with the provided prompt
     """
     from groq import Groq
+    import dotenv
+    
+    # Ensure environment variables are loaded
+    dotenv.load_dotenv()
     
     # Get API key and model from environment variables
     api_key = os.getenv("GROQ_API_KEY", "")
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     
     if not api_key:
-        raise ValueError("GROQ_API_KEY not found in environment variables")
+        raise ValueError(
+            "\nERROR: GROQ_API_KEY not found in environment variables.\n"
+            "Please create a .env file in the project root with your Groq API key:\n"
+            "GROQ_API_KEY=your_api_key_here\n"
+            "\nIf you don't have a Groq API key, you can get one at https://console.groq.com/\n"
+            "\nAlternatively, consider using a different model provider by setting MODEL_PROVIDER in your .env file."
+        )
     
     # Initialize Groq client
     client = Groq(api_key=api_key)
     
-    # Call the Groq API
-    chat_completion = client.chat.completions.create(
-        messages=[
-            {"role": "user", "content": prompt}
-        ],
-        model=model,
-    )
-    
-    # Extract and return the response text
-    return chat_completion.choices[0].message.content
+    try:
+        # Call the Groq API
+        chat_completion = client.chat.completions.create(
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            model=model,
+        )
+        
+        # Extract and return the response text
+        return chat_completion.choices[0].message.content
+    except Exception as e:
+        if 'invalid_api_key' in str(e):
+            raise ValueError(
+                f"\nERROR: Invalid Groq API key. Please check your GROQ_API_KEY in the .env file.\n"
+                f"The key you provided starts with: {api_key[:4]}... (length: {len(api_key)})\n"
+                f"\nIf you recently created this key, it might take a few minutes to activate.\n"
+                f"\nOriginal error: {str(e)}"
+            )
+        else:
+            # Re-raise other exceptions
+            raise
 
 
 
