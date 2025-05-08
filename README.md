@@ -115,7 +115,6 @@ This is a tutorial project of [Pocket Flow](https://github.com/The-Pocket/Pocket
     - `-e, --exclude` - Files to exclude (e.g., "`tests/*`" "`docs/*`")
     - `-s, --max-size` - Maximum file size in bytes (default: 100KB)
     - `--language` - Language for the generated tutorial (default: "english")
-    - `--max-abstractions` - Maximum number of abstractions to identify (default: 10)
     - `--no-cache` - Disable LLM response caching (default: caching enabled)
 
 The application will crawl the repository, analyze the codebase structure, generate tutorial content in the specified language, and save the output in the specified directory (default: ./output).

@@ -15,9 +15,9 @@ DEFAULT_INCLUDE_PATTERNS = {
 
 DEFAULT_EXCLUDE_PATTERNS = {
     "assets/*", "data/*", "examples/*", "images/*", "public/*", "static/*", "temp/*",
-    "docs/*", 
+    "docs/*",
     "venv/*", ".venv/*", "*test*", "tests/*", "docs/*", "examples/*", "v1/*",
-    "dist/*", "build/*", "experimental/*", "deprecated/*", "misc/*", 
+    "dist/*", "build/*", "experimental/*", "deprecated/*", "misc/*",
     "legacy/*", ".git/*", ".github/*", ".next/*", ".vscode/*", "obj/*", "bin/*", "node_modules/*", "*.log"
 }
 
@@ -40,8 +40,6 @@ def main():
     parser.add_argument("--language", default="english", help="Language for the generated tutorial (default: english)")
     # Add use_cache parameter to control LLM caching
     parser.add_argument("--no-cache", action="store_true", help="Disable LLM response caching (default: caching enabled)")
-    # Add max_abstraction_num parameter to control the number of abstractions
-    parser.add_argument("--max-abstractions", type=int, default=10, help="Maximum number of abstractions to identify (default: 10)")
 
     args = parser.parse_args()
 
@@ -67,12 +65,9 @@ def main():
 
         # Add language for multi-language support
         "language": args.language,
-        
+
         # Add use_cache flag (inverse of no-cache flag)
         "use_cache": not args.no_cache,
-        
-        # Add max_abstraction_num parameter
-        "max_abstraction_num": args.max_abstractions,
 
         # Outputs will be populated by the nodes
         "files": [],
