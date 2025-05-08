@@ -1,4 +1,3 @@
-from google import genai
 import os
 import logging
 import json
@@ -25,7 +24,6 @@ logger.addHandler(file_handler)
 cache_file = "llm_cache.json"
 
 
-# By default, we Google Gemini 2.5 pro, as it shows great performance for code understanding
 def call_llm(prompt: str, use_cache: bool = True) -> str:
     # Log the prompt
     logger.info(f"PROMPT: {prompt}")
@@ -46,25 +44,16 @@ def call_llm(prompt: str, use_cache: bool = True) -> str:
             logger.info(f"RESPONSE: {cache[prompt]}")
             return cache[prompt]
 
-    # # Call the LLM if not in cache or cache disabled
-    # client = genai.Client(
-    #     vertexai=True,
-    #     # TODO: change to your own project id and location
-    #     project=os.getenv("GEMINI_PROJECT_ID", "your-project-id"),
-    #     location=os.getenv("GEMINI_LOCATION", "us-central1")
-    # )
-
-    # You can comment the previous line and use the AI Studio key instead:
-    client = genai.Client(
-        api_key=os.getenv("GEMINI_API_KEY", ""),
-    )
-    model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro-exp-03-25")
-    # model = os.getenv("GEMINI_MODEL", "gemini-2.5-flash-preview-04-17")
+    # Determine which LLM provider to use
+    model_provider = os.getenv("MODEL_PROVIDER", "gemini").lower()
     
-    response = client.models.generate_content(model=model, contents=[prompt])
-    response_text = response.text
+    # Call the appropriate LLM based on the provider
+    if model_provider == "groq":
+        response_text = _call_groq(prompt)
+    else:  # Default to Gemini
+        response_text = _call_gemini(prompt)
 
-    # Log the response
+        # Log the response
     logger.info(f"RESPONSE: {response_text}")
 
     # Update cache if enabled
@@ -89,37 +78,51 @@ def call_llm(prompt: str, use_cache: bool = True) -> str:
     return response_text
 
 
-# # Use Anthropic Claude 3.7 Sonnet Extended Thinking
-# def call_llm(prompt, use_cache: bool = True):
-#     from anthropic import Anthropic
-#     client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY", "your-api-key"))
-#     response = client.messages.create(
-#         model="claude-3-7-sonnet-20250219",
-#         max_tokens=21000,
-#         thinking={
-#             "type": "enabled",
-#             "budget_tokens": 20000
-#         },
-#         messages=[
-#             {"role": "user", "content": prompt}
-#         ]
-#     )
-#     return response.content[1].text
+def _call_groq(prompt: str) -> str:
+    """
+    Call the Groq LLM API with the provided prompt
+    """
+    from groq import Groq
+    
+    # Get API key and model from environment variables
+    api_key = os.getenv("GROQ_API_KEY", "")
+    model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+    
+    if not api_key:
+        raise ValueError("GROQ_API_KEY not found in environment variables")
+    
+    # Initialize Groq client
+    client = Groq(api_key=api_key)
+    
+    # Call the Groq API
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {"role": "user", "content": prompt}
+        ],
+        model=model,
+    )
+    
+    # Extract and return the response text
+    return chat_completion.choices[0].message.content
 
-# # Use OpenAI o1
-# def call_llm(prompt, use_cache: bool = True):
-#     from openai import OpenAI
-#     client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY", "your-api-key"))
-#     r = client.chat.completions.create(
-#         model="o1",
-#         messages=[{"role": "user", "content": prompt}],
-#         response_format={
-#             "type": "text"
-#         },
-#         reasoning_effort="medium",
-#         store=False
-#     )
-#     return r.choices[0].message.content
+
+def _call_gemini(prompt: str) -> str:
+    """
+    Call the Google Gemini API with the provided prompt
+    """
+    from google import genai
+    
+    # Initialize Gemini client
+    client = genai.Client(
+        api_key=os.getenv("GEMINI_API_KEY", ""),
+    )
+    model = os.getenv("GEMINI_MODEL", "gemini-2.5-pro-exp-03-25")
+    
+    # Call the Gemini API
+    response = client.models.generate_content(model=model, contents=[prompt])
+    
+    # Extract and return the response text
+    return response.text
 
 # Use OpenRouter API
 # def call_llm(prompt: str, use_cache: bool = True) -> str:
