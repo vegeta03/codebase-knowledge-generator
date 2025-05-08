@@ -1,10 +1,11 @@
 import dotenv
 import os
 import argparse
+import logging
 # Import the function that creates the flow
 from flow import create_tutorial_flow
 
-dotenv.load_dotenv()
+dotenv.load_dotenv(override=True)
 
 # Default file patterns
 DEFAULT_INCLUDE_PATTERNS = {
@@ -40,9 +41,32 @@ def main():
     parser.add_argument("--language", default="english", help="Language for the generated tutorial (default: english)")
     # Add use_cache parameter to control LLM caching
     parser.add_argument("--no-cache", action="store_true", help="Disable LLM response caching (default: caching enabled)")
+    # Add verbose flag for additional logging information
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging output")
 
     args = parser.parse_args()
-
+    
+    # Configure logging based on verbose flag
+    log_level = logging.DEBUG if args.verbose else logging.INFO
+    logging.basicConfig(
+        level=log_level,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.StreamHandler()  # Output to console
+        ]
+    )
+    
+    # Create logger for this module
+    logger = logging.getLogger(__name__)
+    
+    if args.verbose:
+        logger.debug("Verbose logging enabled")
+        # Log all arguments (excluding token for security)
+        safe_args = vars(args).copy()
+        if 'token' in safe_args:
+            safe_args['token'] = '***REDACTED***' if safe_args['token'] else None
+        logger.debug(f"Command line arguments: {safe_args}")
+    
     # Get GitHub token from argument or environment variable if using repo
     github_token = None
     if args.repo:
@@ -81,6 +105,8 @@ def main():
     # Display starting message with repository/directory and language
     print(f"Starting tutorial generation for: {args.repo or args.dir} in {args.language.capitalize()} language")
     print(f"LLM caching: {'Disabled' if args.no_cache else 'Enabled'}")
+    if args.verbose:
+        print("Verbose logging: Enabled")
 
     # Create the flow instance
     tutorial_flow = create_tutorial_flow()
