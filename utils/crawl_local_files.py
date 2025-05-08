@@ -1,6 +1,8 @@
 import os
 import fnmatch
 import pathspec
+import joblib
+from tqdm import tqdm
 
 
 def crawl_local_files(
@@ -9,6 +11,7 @@ def crawl_local_files(
     exclude_patterns=None,
     max_file_size=None,
     use_relative_paths=True,
+    n_jobs=-1,  # Number of parallel jobs, -1 means using all processors
 ):
     """
     Crawl files in a local directory with similar interface as crawl_github_files.
@@ -65,9 +68,10 @@ def crawl_local_files(
             all_files.append(filepath)
 
     total_files = len(all_files)
-    processed_files = 0
+    print(f"Found {total_files} files to process")
 
-    for filepath in all_files:
+    def process_file(filepath):
+        """Process a single file and return (path, content) if valid, None otherwise"""
         relpath = os.path.relpath(filepath, directory) if use_relative_paths else filepath
 
         # --- Exclusion check ---
@@ -90,47 +94,35 @@ def crawl_local_files(
         else:
             included = True
 
-        processed_files += 1 # Increment processed count regardless of inclusion/exclusion
-
         status = "processed"
         if not included or excluded:
-            status = "skipped (excluded)"
-            # Print progress for skipped files due to exclusion
-            if total_files > 0:
-                percentage = (processed_files / total_files) * 100
-                rounded_percentage = int(percentage)
-                print(f"\033[92mProgress: {processed_files}/{total_files} ({rounded_percentage}%) {relpath} [{status}]\033[0m")
-            continue # Skip to next file if not included or excluded
+            return None  # Skip to next file if not included or excluded
 
         if max_file_size and os.path.getsize(filepath) > max_file_size:
-            status = "skipped (size limit)"
-            # Print progress for skipped files due to size limit
-            if total_files > 0:
-                percentage = (processed_files / total_files) * 100
-                rounded_percentage = int(percentage)
-                print(f"\033[92mProgress: {processed_files}/{total_files} ({rounded_percentage}%) {relpath} [{status}]\033[0m")
-            continue # Skip large files
+            return None  # Skip large files
 
         # --- File is being processed ---        
         try:
             with open(filepath, "r", encoding="utf-8") as f:
                 content = f.read()
-            files_dict[relpath] = content
+            return (relpath, content)
         except Exception as e:
-            print(f"Warning: Could not read file {filepath}: {e}")
-            status = "skipped (read error)"
+            return None
 
-        # --- Print progress for processed or error files ---
-        if total_files > 0:
-            percentage = (processed_files / total_files) * 100
-            rounded_percentage = int(percentage)
-            print(f"\033[92mProgress: {processed_files}/{total_files} ({rounded_percentage}%) {relpath} [{status}]\033[0m")
+    # Use joblib to parallelize file processing
+    results = joblib.Parallel(n_jobs=n_jobs)(joblib.delayed(process_file)(filepath) for filepath in tqdm(all_files, desc="Processing files"))
+    
+    # Filter out None results and add to files_dict
+    for result in results:
+        if result is not None:
+            relpath, content = result
+            files_dict[relpath] = content
 
     return {"files": files_dict}
 
 
 if __name__ == "__main__":
-    print("--- Crawling parent directory ('..') ---")
+    print("--- Crawling parent directory ('..')  ---")
     files_data = crawl_local_files(
         "..",
         exclude_patterns={
@@ -141,6 +133,7 @@ if __name__ == "__main__":
             "docs/*",
             "output/*",
         },
+        n_jobs=4,  # Use 4 parallel jobs as an example
     )
     print(f"Found {len(files_data['files'])} files:")
     for path in files_data["files"]:

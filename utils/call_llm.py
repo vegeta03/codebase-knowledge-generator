@@ -14,7 +14,9 @@ log_file = os.path.join(
 logger = logging.getLogger("llm_logger")
 logger.setLevel(logging.INFO)
 logger.propagate = False  # Prevent propagation to root logger
-file_handler = logging.FileHandler(log_file)
+
+# Explicitly set encoding to utf-8 to handle all Unicode characters
+file_handler = logging.FileHandler(log_file, encoding='utf-8')
 file_handler.setFormatter(
     logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
 )

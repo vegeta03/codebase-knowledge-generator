@@ -5,6 +5,8 @@ import tempfile
 import git
 import time
 import fnmatch
+import joblib
+from tqdm import tqdm
 from typing import Union, Set, List, Dict, Tuple, Any
 from urllib.parse import urlparse
 
@@ -14,7 +16,8 @@ def crawl_github_files(
     max_file_size: int = 1 * 1024 * 1024,  # 1 MB
     use_relative_paths: bool = False,
     include_patterns: Union[str, Set[str]] = None,
-    exclude_patterns: Union[str, Set[str]] = None
+    exclude_patterns: Union[str, Set[str]] = None,
+    n_jobs: int = -1  # Number of parallel jobs, -1 means using all processors
 ):
     """
     Crawl files from a specific path in a GitHub repository at a specific commit.
@@ -77,10 +80,11 @@ def crawl_github_files(
             # So rely on default branch, or user can checkout manually later
             # Optionally, user can pass ref explicitly in future API
 
-            # Walk directory
-            files = {}
+            # Walk directory and collect all files to process
+            all_files = []
             skipped_files = []
 
+            print("Collecting files to process...")
             for root, dirs, filenames in os.walk(tmpdirname):
                 for filename in filenames:
                     abs_path = os.path.join(root, filename)
@@ -94,22 +98,38 @@ def crawl_github_files(
 
                     if file_size > max_file_size:
                         skipped_files.append((rel_path, file_size))
-                        print(f"Skipping {rel_path}: size {file_size} exceeds limit {max_file_size}")
                         continue
 
                     # Check include/exclude patterns
                     if not should_include_file(rel_path, filename):
-                        print(f"Skipping {rel_path}: does not match include/exclude patterns")
                         continue
 
-                    # Read content
-                    try:
-                        with open(abs_path, "r", encoding="utf-8") as f:
-                            content = f.read()
-                        files[rel_path] = content
-                        print(f"Added {rel_path} ({file_size} bytes)")
-                    except Exception as e:
-                        print(f"Failed to read {rel_path}: {e}")
+                    all_files.append((abs_path, rel_path, file_size))
+            
+            print(f"Found {len(all_files)} files to process")
+            
+            # Define a function to process individual files
+            def process_file(file_info):
+                abs_path, rel_path, file_size = file_info
+                try:
+                    with open(abs_path, "r", encoding="utf-8") as f:
+                        content = f.read()
+                    return (rel_path, content)
+                except Exception as e:
+                    return None
+            
+            # Process files in parallel
+            results = joblib.Parallel(n_jobs=n_jobs)(
+                joblib.delayed(process_file)(file_info) 
+                for file_info in tqdm(all_files, desc="Processing files")
+            )
+            
+            # Filter out None results and add to files dict
+            files = {}
+            for result in results:
+                if result is not None:
+                    rel_path, content = result
+                    files[rel_path] = content
 
             return {
                 "files": files,
@@ -207,14 +227,15 @@ def crawl_github_files(
         ref = None
         specific_path = ""
     
-    # Dictionary to store path -> content mapping
+    # Dictionary to store path -> content mapping and file info for parallel processing
     files = {}
     skipped_files = []
+    file_info_list = []
     
-    def fetch_contents(path):
-        """Fetch contents of the repository at a specific path and commit"""
+    def collect_file_info(path):
+        """Recursively collect information about files to be downloaded"""
         url = f"https://api.github.com/repos/{owner}/{repo}/contents/{path}"
-        params = {"ref": ref} if ref != None else {}
+        params = {"ref": ref} if ref is not None else {}
         
         response = requests.get(url, headers=headers, params=params)
         
@@ -223,7 +244,7 @@ def crawl_github_files(
             wait_time = max(reset_time - time.time(), 0) + 1
             print(f"Rate limit exceeded. Waiting for {wait_time:.0f} seconds...")
             time.sleep(wait_time)
-            return fetch_contents(path)
+            return collect_file_info(path)
             
         if response.status_code == 404:
             if not token:
@@ -263,60 +284,84 @@ def crawl_github_files(
             if item["type"] == "file":
                 # Check if file should be included based on patterns
                 if not should_include_file(rel_path, item["name"]):
-                    print(f"Skipping {rel_path}: Does not match include/exclude patterns")
                     continue
                 
                 # Check file size if available
                 file_size = item.get("size", 0)
                 if file_size > max_file_size:
                     skipped_files.append((item_path, file_size))
-                    print(f"Skipping {rel_path}: File size ({file_size} bytes) exceeds limit ({max_file_size} bytes)")
                     continue
                 
-                # For files, get raw content
+                # Add file to the list for parallel processing
                 if "download_url" in item and item["download_url"]:
                     file_url = item["download_url"]
-                    file_response = requests.get(file_url, headers=headers)
-                    
-                    # Final size check in case content-length header is available but differs from metadata
-                    content_length = int(file_response.headers.get('content-length', 0))
-                    if content_length > max_file_size:
-                        skipped_files.append((item_path, content_length))
-                        print(f"Skipping {rel_path}: Content length ({content_length} bytes) exceeds limit ({max_file_size} bytes)")
-                        continue
-                        
-                    if file_response.status_code == 200:
-                        files[rel_path] = file_response.text
-                        print(f"Downloaded: {rel_path} ({file_size} bytes) ")
-                    else:
-                        print(f"Failed to download {rel_path}: {file_response.status_code}")
+                    file_info_list.append({
+                        "type": "download_url",
+                        "url": file_url,
+                        "rel_path": rel_path,
+                        "file_size": file_size
+                    })
                 else:
                     # Alternative method if download_url is not available
-                    content_response = requests.get(item["url"], headers=headers)
-                    if content_response.status_code == 200:
-                        content_data = content_response.json()
-                        if content_data.get("encoding") == "base64" and "content" in content_data:
-                            # Check size of base64 content before decoding
-                            if len(content_data["content"]) * 0.75 > max_file_size:  # Approximate size calculation
-                                estimated_size = int(len(content_data["content"]) * 0.75)
-                                skipped_files.append((item_path, estimated_size))
-                                print(f"Skipping {rel_path}: Encoded content exceeds size limit")
-                                continue
-                                
-                            file_content = base64.b64decode(content_data["content"]).decode('utf-8')
-                            files[rel_path] = file_content
-                            print(f"Downloaded: {rel_path} ({file_size} bytes)")
-                        else:
-                            print(f"Unexpected content format for {rel_path}")
-                    else:
-                        print(f"Failed to get content for {rel_path}: {content_response.status_code}")
+                    file_info_list.append({
+                        "type": "api_url",
+                        "url": item["url"],
+                        "rel_path": rel_path,
+                        "file_size": file_size
+                    })
             
             elif item["type"] == "dir":
-                # Recursively process subdirectories
-                fetch_contents(item_path)
+                # Recursively collect file info from subdirectories
+                collect_file_info(item_path)
     
-    # Start crawling from the specified path
-    fetch_contents(specific_path)
+    def download_file(file_info):
+        """Download a single file and return (path, content) if valid"""
+        rel_path = file_info["rel_path"]
+        file_size = file_info["file_size"]
+        
+        if file_info["type"] == "download_url":
+            file_url = file_info["url"]
+            file_response = requests.get(file_url, headers=headers)
+            
+            # Final size check in case content-length header is available but differs from metadata
+            content_length = int(file_response.headers.get('content-length', 0))
+            if content_length > max_file_size:
+                return None
+                    
+            if file_response.status_code == 200:
+                return (rel_path, file_response.text)
+        else:
+            # Alternative method using API URL
+            content_response = requests.get(file_info["url"], headers=headers)
+            if content_response.status_code == 200:
+                content_data = content_response.json()
+                if content_data.get("encoding") == "base64" and "content" in content_data:
+                    # Check size of base64 content before decoding
+                    if len(content_data["content"]) * 0.75 > max_file_size:  # Approximate size calculation
+                        return None
+                            
+                    file_content = base64.b64decode(content_data["content"]).decode('utf-8')
+                    return (rel_path, file_content)
+        return None
+    
+    # Start collecting file info from the specified path
+    print("Collecting file information...")
+    collect_file_info(specific_path)
+    
+    print(f"Found {len(file_info_list)} files to download")
+    
+    # Download files in parallel
+    print("Downloading files in parallel...")
+    results = joblib.Parallel(n_jobs=n_jobs)(
+        joblib.delayed(download_file)(file_info) 
+        for file_info in tqdm(file_info_list, desc="Downloading files")
+    )
+    
+    # Filter out None results and add to files dict
+    for result in results:
+        if result is not None:
+            rel_path, content = result
+            files[rel_path] = content
     
     return {
         "files": files,
@@ -348,6 +393,7 @@ if __name__ == "__main__":
         max_file_size=1 * 1024 * 1024,  # 1 MB in bytes
         use_relative_paths=True,  # Enable relative paths
         include_patterns={"*.py", "*.md"},  # Include Python and Markdown files
+        n_jobs=4,  # Use 4 parallel jobs as an example
     )
     
     files = result["files"]
