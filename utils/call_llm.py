@@ -68,8 +68,17 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
         elif is_verbose:
             print("Cache miss. Calling LLM API...")
 
-    # Call the Groq LLM API
-    response_text = _call_groq(prompt)
+    # Check which model provider to use
+    model_provider = os.getenv("MODEL_PROVIDER", "groq").lower()
+    
+    if is_verbose:
+        print(f"Using model provider: {model_provider}")
+    
+    # Call the appropriate LLM API based on the provider
+    if model_provider == "openrouter":
+        response_text = _call_openrouter(prompt)
+    else:  # Default to groq
+        response_text = _call_groq(prompt)
 
     # Log the response
     logger.info(f"RESPONSE: {response_text}")
@@ -178,26 +187,111 @@ def _call_groq(prompt: str) -> str:
 
 
 
-# Use OpenRouter API
-# def call_llm(prompt: str, use_cache: bool = False) -> str:
-#     # Log the prompt
-#     logger.info(f"PROMPT: {prompt}")
-
-#     # Check cache if enabled
-#     if use_cache:
-#         # Load cache from disk
-#         cache = {}
-#         if os.path.exists(cache_file):
-#             try:
-#                 with open(cache_file, "r") as f:
-#                     cache = json.load(f)
-#             except:
-#                 logger.warning(f"Failed to load cache, starting with empty cache")
-
-#         # Return from cache if exists
-#         if prompt in cache:
-#             logger.info(f"RESPONSE: {cache[prompt]}")
-#             return cache[prompt]
+def _call_openrouter(prompt: str) -> str:
+    """
+    Call the OpenRouter API using the OpenAI SDK with the provided prompt
+    """
+    from openai import OpenAI
+    import dotenv
+    
+    # Ensure environment variables are loaded
+    dotenv.load_dotenv(override=True)
+    
+    # Check if verbose mode is enabled
+    root_logger = logging.getLogger()
+    is_verbose = root_logger.level <= logging.DEBUG
+    
+    # Get API key and model from environment variables
+    api_key = os.getenv("OPENROUTER_API_KEY", "")
+    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
+    
+    if is_verbose:
+        print(f"Using OpenRouter with model: {model}")
+        # Check API key format without revealing the full key
+        if api_key:
+            print(f"API key found. Key starts with: {api_key[:4]}... (length: {len(api_key)})")
+        else:
+            print("WARNING: No API key found in environment variables.")
+    
+    if not api_key:
+        raise ValueError(
+            "\nERROR: OPENROUTER_API_KEY not found in environment variables.\n"
+            "Please create a .env file in the project root with your OpenRouter API key:\n"
+            "OPENROUTER_API_KEY=your_api_key_here\n"
+            "OPENROUTER_MODEL=openai/gpt-4o (or another model ID)\n"
+            "\nIf you don't have an OpenRouter API key, you can get one at https://openrouter.ai/\n"
+            "\nAlternatively, consider using a different model provider by setting MODEL_PROVIDER in your .env file."
+        )
+    
+    # Initialize OpenAI client with OpenRouter base URL
+    client = OpenAI(
+        base_url="https://openrouter.ai/api/v1",
+        api_key=api_key
+    )
+    
+    try:
+        # Call the OpenRouter API via OpenAI SDK
+        if is_verbose:
+            print("Sending request to OpenRouter API...")
+            start_time = datetime.now()
+        
+        # No extra headers needed for basic functionality
+        # OpenRouter will still work without site information
+        extra_headers = {}
+        
+        # Check if fallback models are specified
+        fallback_models = os.getenv("OPENROUTER_FALLBACK_MODELS", "")
+        extra_body = {}
+        if fallback_models:
+            # Convert comma-separated string to list
+            models_list = [m.strip() for m in fallback_models.split(",")]
+            if is_verbose:
+                print(f"Using fallback models: {models_list}")
+            extra_body["models"] = models_list
+        
+        chat_completion = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "user", "content": prompt}
+            ],
+            extra_headers=extra_headers,
+            **extra_body
+        )
+        
+        # Calculate and log response time in verbose mode
+        if is_verbose:
+            end_time = datetime.now()
+            duration = (end_time - start_time).total_seconds()
+            print(f"Received response from OpenRouter API in {duration:.2f} seconds")
+            # Log which model was actually used if provided
+            if hasattr(chat_completion, 'model'):
+                print(f"Model used: {chat_completion.model}")
+        
+        # Extract and return the response text
+        response = chat_completion.choices[0].message.content
+        
+        if is_verbose:
+            print(f"Response length: {len(response)} characters")
+            if len(response) > 500:
+                # Show truncated response in verbose mode for readability
+                print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
+        
+        return response
+    except Exception as e:
+        if 'invalid_api_key' in str(e) or 'authentication' in str(e).lower():
+            raise ValueError(
+                f"\nERROR: Invalid OpenRouter API key. Please check your OPENROUTER_API_KEY in the .env file.\n"
+                f"The key you provided starts with: {api_key[:4]}... (length: {len(api_key)})\n"
+                f"\nOriginal error: {str(e)}"
+            )
+        elif 'model_not_found' in str(e) or 'model' in str(e).lower() and 'not' in str(e).lower():
+            raise ValueError(
+                f"\nERROR: Model '{model}' not found or not available. Please check your OPENROUTER_MODEL in the .env file.\n"
+                f"\nOriginal error: {str(e)}"
+            )
+        else:
+            # Re-raise other exceptions
+            raise
 
 #     # OpenRouter API configuration
 #     api_key = os.getenv("OPENROUTER_API_KEY", "")
