@@ -3,6 +3,9 @@ import os
 import argparse
 import logging
 
+# Import the keyboard handler to enable ESC key termination
+from utils.keyboard_handler import setup_exit_handler
+
 # Apply joblib patch before importing any modules that might use joblib
 from joblib_patch import apply_joblib_patches
 apply_joblib_patches()
@@ -150,12 +153,22 @@ def main():
     print(f"LLM caching: {'Enabled' if args.cache else 'Disabled'}")
     if args.verbose:
         print("Verbose logging: Enabled")
+        
+    # Setup keyboard handler to allow ESC key termination at any time
+    keyboard_thread = setup_exit_handler()
 
     # Create the flow instance
     tutorial_flow = create_tutorial_flow()
 
-    # Run the flow
-    tutorial_flow.run(shared)
+    try:
+        # Run the flow
+        tutorial_flow.run(shared)
+    except KeyboardInterrupt:
+        logger.info("Process interrupted by keyboard")
+        print("\n🛑 Process interrupted. Shutting down...")
+    except Exception as e:
+        logger.error(f"Error in main execution: {str(e)}")
+        raise
 
 if __name__ == "__main__":
     main()

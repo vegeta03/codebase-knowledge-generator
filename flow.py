@@ -8,6 +8,11 @@ from nodes import (
     WriteChapters,
     CombineTutorial
 )
+import signal
+import logging
+
+# Configure logging
+logger = logging.getLogger(__name__)
 
 def create_tutorial_flow():
     """Creates and returns the codebase tutorial generation flow."""
