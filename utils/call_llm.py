@@ -71,15 +71,20 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     # Check which model provider to use
     model_provider = os.getenv("MODEL_PROVIDER", "groq").lower()
     
+    # Check if streaming is enabled
+    stream = os.getenv("STREAM", "False").lower() in ["true", "1", "yes"]
+    if is_verbose and stream:
+        print("Streaming mode is enabled")
+    
     # Determine which model will be used based on provider
     if model_provider == "openrouter":
         model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-        print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}]")
-        response_text = _call_openrouter(prompt)
+        print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
+        response_text = _call_openrouter(prompt, stream=stream)
     else:  # Default to groq
         model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}]")
-        response_text = _call_groq(prompt)
+        print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
+        response_text = _call_groq(prompt, stream=stream)
         
     if is_verbose:
         print(f"Additional debug info - Using model provider: {model_provider}")
@@ -109,12 +114,13 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     return response_text
 
 
-def _call_groq(prompt: str) -> str:
+def _call_groq(prompt: str, stream: bool = False) -> str:
     """
     Call the Groq LLM API with the provided prompt
     """
     from groq import Groq
     import dotenv
+    import sys
     
     # Ensure environment variables are loaded
     dotenv.load_dotenv(override=True)
@@ -129,6 +135,7 @@ def _call_groq(prompt: str) -> str:
     
     if is_verbose:
         print(f"Using Groq LLM model: {model}")
+        print(f"Streaming mode: {'Enabled' if stream else 'Disabled'}")
         # Check API key format without revealing the full key
         if api_key:
             print(f"API key found. Key starts with: {api_key[:4]}... (length: {len(api_key)})")
@@ -152,27 +159,52 @@ def _call_groq(prompt: str) -> str:
         if is_verbose:
             print("Sending request to Groq API...")
             start_time = datetime.now()
+        
+        # Handle streaming differently if enabled
+        if stream:
+            full_response = ""
+            # Using streaming API
+            stream_response = client.chat.completions.create(
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+                stream=True
+            )
             
-        chat_completion = client.chat.completions.create(
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            model=model,
-        )
+            # Process the stream
+            print("Receiving streamed response:")
+            for chunk in stream_response:
+                # Extract content from the chunk
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    content = chunk.choices[0].delta.content
+                    full_response += content
+                    # Print the chunk content to the console
+                    print(content, end="", flush=True)
+            
+            # Add a newline after the streamed response
+            print()
+            response = full_response
+        else:
+            # Non-streaming API call
+            chat_completion = client.chat.completions.create(
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                model=model,
+            )
+            
+            # Extract and return the response text
+            response = chat_completion.choices[0].message.content
         
         # Calculate and log response time in verbose mode
         if is_verbose:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
-            print(f"Received response from Groq API in {duration:.2f} seconds")
-        
-        # Extract and return the response text
-        response = chat_completion.choices[0].message.content
-        
-        if is_verbose:
+            print(f"Received {'streamed ' if stream else ''}response from Groq API in {duration:.2f} seconds")
             print(f"Response length: {len(response)} characters")
-            if len(response) > 500:
-                # Show truncated response in verbose mode for readability
+            if len(response) > 500 and not stream:
+                # Show truncated response in verbose mode for readability (only if not streamed)
                 print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
         
         return response
@@ -191,12 +223,14 @@ def _call_groq(prompt: str) -> str:
 
 
 
-def _call_openrouter(prompt: str) -> str:
+def _call_openrouter(prompt: str, stream: bool = False) -> str:
     """
     Call the OpenRouter API using the OpenAI SDK with the provided prompt
+    Can use streaming if the stream parameter is True
     """
     from openai import OpenAI
     import dotenv
+    import sys
     
     # Ensure environment variables are loaded
     dotenv.load_dotenv(override=True)
@@ -211,6 +245,7 @@ def _call_openrouter(prompt: str) -> str:
     
     if is_verbose:
         print(f"Using OpenRouter with model: {model}")
+        print(f"Streaming mode: {'Enabled' if stream else 'Disabled'}")
         # Check API key format without revealing the full key
         if api_key:
             print(f"API key found. Key starts with: {api_key[:4]}... (length: {len(api_key)})")
@@ -243,33 +278,57 @@ def _call_openrouter(prompt: str) -> str:
         # OpenRouter will still work without site information
         extra_headers = {}
         
-        # We're not using fallback models anymore as requested
-        extra_body = {}
-        
-        chat_completion = client.chat.completions.create(
-            model=model,
-            messages=[
-                {"role": "user", "content": prompt}
-            ],
-            extra_headers=extra_headers
-        )
+        # Handle streaming differently if enabled
+        if stream:
+            full_response = ""
+            # Using streaming API
+            stream_response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                stream=True,
+                extra_headers=extra_headers
+            )
+            
+            # Process the stream
+            print("Receiving streamed response:")
+            for chunk in stream_response:
+                # Extract content from the chunk
+                if chunk.choices and chunk.choices[0].delta.content is not None:
+                    content = chunk.choices[0].delta.content
+                    full_response += content
+                    # Print the chunk content to the console
+                    print(content, end="", flush=True)
+            
+            # Add a newline after the streamed response
+            print()
+            response = full_response
+        else:
+            # Non-streaming API call
+            chat_completion = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {"role": "user", "content": prompt}
+                ],
+                extra_headers=extra_headers
+            )
+            
+            # Extract and return the response text
+            response = chat_completion.choices[0].message.content
         
         # Calculate and log response time in verbose mode
         if is_verbose:
             end_time = datetime.now()
             duration = (end_time - start_time).total_seconds()
-            print(f"Received response from OpenRouter API in {duration:.2f} seconds")
-            # Log which model was actually used if provided
-            if hasattr(chat_completion, 'model'):
+            print(f"Received {'streamed ' if stream else ''}response from OpenRouter API in {duration:.2f} seconds")
+            # Log which model was actually used if not streaming (not available in streaming response)
+            if not stream and hasattr(chat_completion, 'model'):
                 print(f"Model used: {chat_completion.model}")
-        
-        # Extract and return the response text
-        response = chat_completion.choices[0].message.content
-        
-        if is_verbose:
+            
             print(f"Response length: {len(response)} characters")
-            if len(response) > 500:
-                # Show truncated response in verbose mode for readability
+            if len(response) > 500 and not stream:
+                # Show truncated response in verbose mode for readability (only if not streamed)
                 print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
         
         return response
