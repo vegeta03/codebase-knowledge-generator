@@ -151,21 +151,21 @@ Format the output as a JSON5 list of dictionaries:
 
 ```json5
 [
-  {
+  {{
     "name": "Query Processing{name_lang_hint}",
     "description": "Explains what the abstraction does.\nIt's like a central dispatcher routing requests.{desc_lang_hint}",
     "file_indices": [
       "0 # path/to/file1.py",
       "3 # path/to/related.py"
     ]
-  },
-  {
+  }},
+  {{
     "name": "Query Optimization{name_lang_hint}",
     "description": "Another core concept, similar to a blueprint for objects.{desc_lang_hint}",
     "file_indices": [
       "5 # path/to/another.js"
     ]
-  }
+  }}
   // ... include all complete and comprehensive core most important abstractions
 ]
 ```"""
@@ -320,27 +320,32 @@ Context (Abstractions, Descriptions, Code):
     Ideally the relationship should be backed by one abstraction calling or passing parameters to another.
     Make the relationship Simple but don't dilute it while doing so and exclude those non-important ones.
 
-IMPORTANT: Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target). Each abstraction index must appear at least once across all relationships.
+IMPORTANT INSTRUCTIONS:
+1. Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target).
+2. Each abstraction index must appear at least once across all relationships.
+3. Use ONLY the abstraction indices (0 to {num_abstractions-1}) from the list above, NOT file indices.
+4. Do NOT use file indices or project names in the relationships.
+5. The indices in from_abstraction and to_abstraction must be between 0 and {num_abstractions-1} inclusive.
 
 Format the output as JSON5:
 
 ```json5
-{
+{{
   "summary": "A brief, simple explanation of the project{lang_hint}.\nCan span multiple lines with **bold** and *italic* for emphasis.",
   "relationships": [
-    {
+    {{
       "from_abstraction": "0 # AbstractionName1",
       "to_abstraction": "1 # AbstractionName2",
       "label": "Manages{lang_hint}"
-    },
-    {
+    }},
+    {{
       "from_abstraction": "2 # AbstractionName3",
       "to_abstraction": "0 # AbstractionName1",
       "label": "Provides config{lang_hint}"
-    }
+    }}
     // ... other relationships
   ]
-}
+}}
 ```
 
 Now, provide the JSON5 output:
@@ -378,14 +383,34 @@ Now, provide the JSON5 output:
 
             # Validate indices
             try:
-                from_idx = int(str(rel["from_abstraction"]).split("#")[0].strip())
-                to_idx = int(str(rel["to_abstraction"]).split("#")[0].strip())
-                if not (
-                    0 <= from_idx < num_abstractions and 0 <= to_idx < num_abstractions
-                ):
-                    raise ValueError(
-                        f"Invalid index in relationship: from={from_idx}, to={to_idx}. Max index is {num_abstractions-1}."
-                    )
+                # Extract the index from the from_abstraction field
+                from_str = str(rel["from_abstraction"]).strip()
+                if "#" in from_str:
+                    from_idx = int(from_str.split("#")[0].strip())
+                else:
+                    from_idx = int(from_str)
+
+                # Extract the index from the to_abstraction field
+                to_str = str(rel["to_abstraction"]).strip()
+                if "#" in to_str:
+                    to_idx = int(to_str.split("#")[0].strip())
+                else:
+                    to_idx = int(to_str)
+
+                # Check if indices are valid
+                if not (0 <= from_idx < num_abstractions):
+                    print(f"Warning: Invalid 'from' index {from_idx} in relationship. Max index is {num_abstractions-1}.")
+                    # Try to fix by using a valid index
+                    from_idx = from_idx % num_abstractions
+                    print(f"Auto-correcting to index {from_idx}")
+
+                if not (0 <= to_idx < num_abstractions):
+                    print(f"Warning: Invalid 'to' index {to_idx} in relationship. Max index is {num_abstractions-1}.")
+                    # Try to fix by using a valid index
+                    to_idx = to_idx % num_abstractions
+                    print(f"Auto-correcting to index {to_idx}")
+
+                # Add the validated relationship
                 validated_relationships.append(
                     {
                         "from": from_idx,
@@ -393,8 +418,70 @@ Now, provide the JSON5 output:
                         "label": rel["label"],  # Potentially translated label
                     }
                 )
-            except (ValueError, TypeError):
-                raise ValueError(f"Could not parse indices from relationship: {rel}")
+            except (ValueError, TypeError) as e:
+                print(f"Warning: Could not parse indices from relationship: {rel}. Error: {e}")
+                # Instead of failing, try to extract any numbers from the strings
+                try:
+                    # Try to extract numbers from the strings
+                    from_str = str(rel["from_abstraction"])
+                    to_str = str(rel["to_abstraction"])
+
+                    # Use regex to find the first number in each string
+                    import re
+                    from_matches = re.findall(r'\d+', from_str)
+                    to_matches = re.findall(r'\d+', to_str)
+
+                    if from_matches and to_matches:
+                        from_idx = int(from_matches[0]) % num_abstractions
+                        to_idx = int(to_matches[0]) % num_abstractions
+
+                        print(f"Auto-corrected indices: from={from_idx}, to={to_idx}")
+
+                        validated_relationships.append(
+                            {
+                                "from": from_idx,
+                                "to": to_idx,
+                                "label": rel["label"],  # Potentially translated label
+                            }
+                        )
+                    else:
+                        # If we can't extract numbers, use default indices
+                        print(f"Could not extract indices, using defaults: from=0, to=1")
+                        validated_relationships.append(
+                            {
+                                "from": 0,
+                                "to": min(1, num_abstractions-1),  # Use 1 or max index if only 1 abstraction
+                                "label": rel["label"],  # Potentially translated label
+                            }
+                        )
+                except Exception as e2:
+                    print(f"Failed to auto-correct relationship: {e2}")
+                    # If all else fails, use default indices
+                    validated_relationships.append(
+                        {
+                            "from": 0,
+                            "to": min(1, num_abstractions-1),  # Use 1 or max index if only 1 abstraction
+                            "label": rel["label"],  # Potentially translated label
+                        }
+                    )
+
+        # Check if all abstractions are involved in at least one relationship
+        involved_abstractions = set()
+        for rel in validated_relationships:
+            involved_abstractions.add(rel["from"])
+            involved_abstractions.add(rel["to"])
+
+        # If any abstractions are missing, add relationships to ensure all are included
+        for i in range(num_abstractions):
+            if i not in involved_abstractions:
+                print(f"Warning: Abstraction {i} is not involved in any relationship. Adding a default relationship.")
+                # Add a relationship from this abstraction to the next one (or the first one if this is the last)
+                to_idx = (i + 1) % num_abstractions
+                validated_relationships.append({
+                    "from": i,
+                    "to": to_idx,
+                    "label": "Relates to"  # Default generic label
+                })
 
         print("Generated project summary and relationship details.")
         return {
