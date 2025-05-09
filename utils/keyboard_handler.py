@@ -16,10 +16,10 @@ def setup_exit_handler():
     def on_exit_key():
         logger.info("Ctrl+Q pressed - terminating process")
         print("\n🛑 Ctrl+Q pressed. Terminating process...")
-            
-            # Use os.kill to send SIGTERM to the current process
-            # This is more reliable than sys.exit() as it will terminate all threads
-            os.kill(os.getpid(), signal.SIGTERM)
+        
+        # Use os.kill to send SIGTERM to the current process
+        # This is more reliable than sys.exit() as it will terminate all threads
+        os.kill(os.getpid(), signal.SIGTERM)
     
     def start_keyboard_listener():
         # Register the Ctrl+Q key handler

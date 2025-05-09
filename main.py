@@ -1,3 +1,6 @@
+# At the beginning of your main script
+from joblib_patch import apply_joblib_patches
+apply_joblib_patches()
 import dotenv
 import os
 import argparse
