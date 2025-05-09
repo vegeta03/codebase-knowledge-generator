@@ -290,6 +290,11 @@ Format the output as a JSON5 list of dictionaries:
         shared["abstractions"] = (
             exec_res  # List of {"name": str, "description": str, "files": [int]}
         )
+        
+        # List the identified abstractions by name
+        print("Identified abstractions:")
+        for i, abstraction in enumerate(exec_res):
+            print(f"  {i+1}. {abstraction['name']}")
 
 
 class AnalyzeRelationships(Node):
