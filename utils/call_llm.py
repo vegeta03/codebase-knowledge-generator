@@ -76,6 +76,12 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     if is_verbose and stream:
         print("Streaming mode is enabled")
     
+    # Log system prompt usage if verbose
+    use_system_prompt = os.getenv("USE_SYSTEM_PROMPT", "False").lower() in ["true", "1", "yes"]
+    if is_verbose and use_system_prompt:
+        system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
+        print(f"System prompt is enabled: '{system_prompt[:30]}...' (length: {len(system_prompt)})")
+    
     # Determine which model will be used based on provider
     if model_provider == "openrouter":
         model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
@@ -133,6 +139,10 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
     api_key = os.getenv("GROQ_API_KEY", "")
     model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
     
+    # Check if system prompt should be used
+    use_system_prompt = os.getenv("USE_SYSTEM_PROMPT", "False").lower() in ["true", "1", "yes"]
+    system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
+    
     if is_verbose:
         print(f"Using Groq LLM model: {model}")
         print(f"Streaming mode: {'Enabled' if stream else 'Disabled'}")
@@ -163,11 +173,15 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
         # Handle streaming differently if enabled
         if stream:
             full_response = ""
+            # Prepare messages list based on system prompt setting
+            messages = []
+            if use_system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
             # Using streaming API
             stream_response = client.chat.completions.create(
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 model=model,
                 stream=True
             )
@@ -187,10 +201,14 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
             response = full_response
         else:
             # Non-streaming API call
+            # Prepare messages list based on system prompt setting
+            messages = []
+            if use_system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
             chat_completion = client.chat.completions.create(
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 model=model,
             )
             
@@ -243,6 +261,10 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
     
+    # Check if system prompt should be used
+    use_system_prompt = os.getenv("USE_SYSTEM_PROMPT", "False").lower() in ["true", "1", "yes"]
+    system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
+    
     if is_verbose:
         print(f"Using OpenRouter with model: {model}")
         print(f"Streaming mode: {'Enabled' if stream else 'Disabled'}")
@@ -282,11 +304,15 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
         if stream:
             full_response = ""
             # Using streaming API
+            # Prepare messages list based on system prompt setting
+            messages = []
+            if use_system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
             stream_response = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 stream=True,
                 extra_headers=extra_headers
             )
@@ -306,11 +332,15 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
             response = full_response
         else:
             # Non-streaming API call
+            # Prepare messages list based on system prompt setting
+            messages = []
+            if use_system_prompt:
+                messages.append({"role": "system", "content": system_prompt})
+            messages.append({"role": "user", "content": prompt})
+            
             chat_completion = client.chat.completions.create(
                 model=model,
-                messages=[
-                    {"role": "user", "content": prompt}
-                ],
+                messages=messages,
                 extra_headers=extra_headers
             )
             
