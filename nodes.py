@@ -1,6 +1,6 @@
 import os
 import re
-import yaml
+import json5
 from pocketflow import Node, BatchNode
 from utils.crawl_github_files import crawl_github_files
 from utils.call_llm import call_llm
@@ -147,30 +147,33 @@ For each abstraction, provide:
 List of file indices and paths present in the context:
 {file_listing_for_prompt}
 
-Format the output as a YAML list of dictionaries:
+Format the output as a JSON5 list of dictionaries:
 
-```yaml
-- name: |
-    Query Processing{name_lang_hint}
-  description: |
-    Explains what the abstraction does.
-    It's like a central dispatcher routing requests.{desc_lang_hint}
-  file_indices:
-    - 0 # path/to/file1.py
-    - 3 # path/to/related.py
-- name: |
-    Query Optimization{name_lang_hint}
-  description: |
-    Another core concept, similar to a blueprint for objects.{desc_lang_hint}
-  file_indices:
-    - 5 # path/to/another.js
-# ... include all complete and comprehensive core most important abstractions
+```json5
+[
+  {
+    "name": "Query Processing{name_lang_hint}",
+    "description": "Explains what the abstraction does.\nIt's like a central dispatcher routing requests.{desc_lang_hint}",
+    "file_indices": [
+      "0 # path/to/file1.py",
+      "3 # path/to/related.py"
+    ]
+  },
+  {
+    "name": "Query Optimization{name_lang_hint}",
+    "description": "Another core concept, similar to a blueprint for objects.{desc_lang_hint}",
+    "file_indices": [
+      "5 # path/to/another.js"
+    ]
+  }
+  // ... include all complete and comprehensive core most important abstractions
+]
 ```"""
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0))  # Use cache only if enabled and not retrying
 
         # --- Validation ---
-        yaml_str = response.strip().split("```yaml")[1].split("```")[0].strip()
-        abstractions = yaml.safe_load(yaml_str)
+        json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+        abstractions = json5.loads(json5_str)
 
         if not isinstance(abstractions, list):
             raise ValueError("LLM Output is not a list")
@@ -319,29 +322,34 @@ Context (Abstractions, Descriptions, Code):
 
 IMPORTANT: Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target). Each abstraction index must appear at least once across all relationships.
 
-Format the output as YAML:
+Format the output as JSON5:
 
-```yaml
-summary: |
-  A brief, simple explanation of the project{lang_hint}.
-  Can span multiple lines with **bold** and *italic* for emphasis.
-relationships:
-  - from_abstraction: 0 # AbstractionName1
-    to_abstraction: 1 # AbstractionName2
-    label: "Manages"{lang_hint}
-  - from_abstraction: 2 # AbstractionName3
-    to_abstraction: 0 # AbstractionName1
-    label: "Provides config"{lang_hint}
-  # ... other relationships
+```json5
+{
+  "summary": "A brief, simple explanation of the project{lang_hint}.\nCan span multiple lines with **bold** and *italic* for emphasis.",
+  "relationships": [
+    {
+      "from_abstraction": "0 # AbstractionName1",
+      "to_abstraction": "1 # AbstractionName2",
+      "label": "Manages{lang_hint}"
+    },
+    {
+      "from_abstraction": "2 # AbstractionName3",
+      "to_abstraction": "0 # AbstractionName1",
+      "label": "Provides config{lang_hint}"
+    }
+    // ... other relationships
+  ]
+}
 ```
 
-Now, provide the YAML output:
+Now, provide the JSON5 output:
 """
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
 
         # --- Validation ---
-        yaml_str = response.strip().split("```yaml")[1].split("```")[0].strip()
-        relationships_data = yaml.safe_load(yaml_str)
+        json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+        relationships_data = json5.loads(json5_str)
 
         if not isinstance(relationships_data, dict) or not all(
             k in relationships_data for k in ["summary", "relationships"]
@@ -470,20 +478,22 @@ Ideally, first explain those that are the most important or foundational, perhap
 
 Output the ordered list of abstraction indices, including the name in a comment for clarity. Use the format `idx # AbstractionName`.
 
-```yaml
-- 2 # FoundationalConcept
-- 0 # CoreClassA
-- 1 # CoreClassB (uses CoreClassA)
-- ...
+```json5
+[
+  "2 # FoundationalConcept",
+  "0 # CoreClassA",
+  "1 # CoreClassB (uses CoreClassA)",
+  // ...
+]
 ```
 
-Now, provide the YAML output:
+Now, provide the JSON5 output:
 """
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
 
         # --- Validation ---
-        yaml_str = response.strip().split("```yaml")[1].split("```")[0].strip()
-        ordered_indices_raw = yaml.safe_load(yaml_str)
+        json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+        ordered_indices_raw = json5.loads(json5_str)
 
         if not isinstance(ordered_indices_raw, list):
             raise ValueError("LLM output is not a list")

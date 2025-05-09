@@ -7,3 +7,4 @@ pathspec
 groq
 joblib
 tqdm
+json5
