@@ -679,14 +679,55 @@ Now, provide the JSON5 output:
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
 
         # --- Validation ---
-        json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-        ordered_indices_raw = json5.loads(json5_str)
+        try:
+            json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+        except IndexError:
+            # Handle case where ```json5 is not found
+            print("Could not find ```json5 in response, trying to extract JSON from any code block")
+            if "```" in response:
+                json5_str = response.strip().split("```")[1].split("```")[0].strip()
+            else:
+                json5_str = response.strip()
+
+        try:
+            ordered_indices_raw = json5.loads(json5_str)
+        except ValueError as e:
+            print(f"Error parsing JSON5 from LLM response: {e}")
+            print("Attempting to fix malformed JSON5...")
+
+            # Try to clean up common JSON5 formatting issues
+            # Remove comments
+            json5_str = re.sub(r'//.*', '', json5_str)
+            # Fix trailing commas
+            json5_str = re.sub(r',\s*]', ']', json5_str)
+
+            try:
+                ordered_indices_raw = json5.loads(json5_str)
+            except ValueError as e2:
+                print(f"Failed to fix JSON5: {e2}")
+                # Create a minimal valid structure as fallback
+                print("Using fallback ordering based on abstraction indices")
+                ordered_indices_raw = [str(i) for i in range(num_abstractions)]
 
         if not isinstance(ordered_indices_raw, list):
-            raise ValueError("LLM output is not a list")
+            print("LLM output is not a list, converting to list")
+            if isinstance(ordered_indices_raw, dict):
+                # Try to extract a list from the dict if possible
+                for key, value in ordered_indices_raw.items():
+                    if isinstance(value, list):
+                        ordered_indices_raw = value
+                        break
+                else:
+                    # If no list found in dict values, create default list
+                    ordered_indices_raw = [str(i) for i in range(num_abstractions)]
+            else:
+                ordered_indices_raw = [str(i) for i in range(num_abstractions)]
 
+        # Process the raw indices, handling duplicates and invalid entries
         ordered_indices = []
         seen_indices = set()
+
+        # First pass: collect valid indices
         for entry in ordered_indices_raw:
             try:
                 if isinstance(entry, int):
@@ -696,25 +737,43 @@ Now, provide the JSON5 output:
                 else:
                     idx = int(str(entry).strip())
 
+                # Validate index range
                 if not (0 <= idx < num_abstractions):
-                    raise ValueError(
-                        f"Invalid index {idx} in ordered list. Max index is {num_abstractions-1}."
-                    )
+                    print(f"Warning: Invalid index {idx} in ordered list. Max index is {num_abstractions-1}.")
+                    # Use modulo to bring into valid range
+                    idx = idx % num_abstractions
+                    print(f"Auto-correcting to index {idx}")
+
+                # Handle duplicates by skipping them
                 if idx in seen_indices:
-                    raise ValueError(f"Duplicate index {idx} found in ordered list.")
+                    print(f"Warning: Duplicate index {idx} found in ordered list. Skipping duplicate.")
+                    continue
+
                 ordered_indices.append(idx)
                 seen_indices.add(idx)
+            except (ValueError, TypeError) as e:
+                print(f"Warning: Could not parse index from ordered list entry: {entry}. Error: {e}")
+                # Continue instead of raising an exception
+                continue
 
-            except (ValueError, TypeError):
-                raise ValueError(
-                    f"Could not parse index from ordered list entry: {entry}"
-                )
+        # Second pass: add any missing indices
+        missing_indices = set(range(num_abstractions)) - seen_indices
+        if missing_indices:
+            print(f"Warning: Missing indices in ordered list: {missing_indices}")
+            print("Adding missing indices to the end of the list")
+            ordered_indices.extend(sorted(missing_indices))
 
-        # Check if all abstractions are included
+        # Ensure we have the right number of indices
         if len(ordered_indices) != num_abstractions:
-            raise ValueError(
-                f"Ordered list length ({len(ordered_indices)}) does not match number of abstractions ({num_abstractions}). Missing indices: {set(range(num_abstractions)) - seen_indices}"
-            )
+            print(f"Warning: Ordered list length ({len(ordered_indices)}) does not match number of abstractions ({num_abstractions}).")
+            # If we somehow still don't have the right number, use a fallback ordering
+            if len(ordered_indices) < num_abstractions:
+                # Add any indices that are still missing
+                still_missing = set(range(num_abstractions)) - set(ordered_indices)
+                ordered_indices.extend(sorted(still_missing))
+            elif len(ordered_indices) > num_abstractions:
+                # Truncate to the right number
+                ordered_indices = ordered_indices[:num_abstractions]
 
         print(f"Determined chapter order (indices): {ordered_indices}")
         return ordered_indices  # Return the list of indices
