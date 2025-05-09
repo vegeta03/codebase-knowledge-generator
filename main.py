@@ -49,8 +49,26 @@ DEFAULT_EXCLUDE_PATTERNS = {
     # Virtual environments
     "venv/*", ".venv/*",
     
-    # Angular/TypeScript specific test files - ONLY exclude spec files, not entire directories
-    "*.spec.ts", "**/test-setup.ts", "**/apps/*-e2e/**", "**/e2e/**",
+    # Test directories and patterns
+    # Jest
+    "**/__tests__/**", "**/__mocks__/**", "*.test.js", "*.test.jsx", "*.test.ts", "*.test.tsx",
+    "jest.config.js", "jest.config.ts", "jest.setup.js", "jest-setup.*",
+    
+    # Jasmine & Karma
+    "*.spec.js", "*.spec.jsx", "*.spec.ts", "*.spec.tsx", "*_spec.js", "karma.conf.js", "karma.config.js",
+    "karma-*.js", "jasmine.json",
+    
+    # Playwright
+    "**/tests/**", "**/test/**", "**/e2e/**", "**/spec/**", "playwright.config.*",
+    
+    # Cypress
+    "cypress/**", "**/*.cy.js", "**/*.cy.ts", "**/*.cy.jsx", "**/*.cy.tsx", "cypress.config.*",
+    
+    # Protractor
+    "protractor.conf.js", "**/e2e-spec.*", "**/apps/*-e2e/**", "**/e2e/**",
+    
+    # Generic test directories
+    "**/test-utils/**", "**/test-helpers/**", "**/test-setup/**",
     
     # Build and output directories
     "dist/*", "build/*", "experimental/*", "deprecated/*", "misc/*",
