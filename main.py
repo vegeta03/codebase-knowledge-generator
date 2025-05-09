@@ -20,11 +20,28 @@ DEFAULT_INCLUDE_PATTERNS = {
 }
 
 DEFAULT_EXCLUDE_PATTERNS = {
+    # Asset directories
     "assets/*", "data/*", "examples/*", "images/*", "public/*", "static/*", "temp/*",
-    "docs/*",
-    "venv/*", ".venv/*", "*test*", "tests/*", "docs/*", "examples/*", "v1/*",
+    
+    # Documentation and example directories
+    "docs/*", "examples/*",
+    
+    # Virtual environments
+    "venv/*", ".venv/*",
+    
+    # Angular/TypeScript specific test files
+    "*.spec.ts", "**/test-setup.ts", "**/*-e2e/**",
+    "**/apps/*-e2e/**", "**/e2e/**", "**/*test*/**",
+    
+    # Build and output directories
     "dist/*", "build/*", "experimental/*", "deprecated/*", "misc/*",
-    "legacy/*", ".git/*", ".github/*", ".next/*", ".vscode/*", "obj/*", "bin/*", "node_modules/*", "*.log"
+    "legacy/*", "v1/*", "obj/*", "bin/*",
+    
+    # System and IDE directories
+    ".git/*", ".github/*", ".next/*", ".vscode/*", "node_modules/*",
+    
+    # Log files
+    "*.log"
 }
 
 # --- Main Function ---
