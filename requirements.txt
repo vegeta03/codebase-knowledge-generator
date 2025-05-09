@@ -8,3 +8,4 @@ groq
 joblib
 tqdm
 json5
+openai

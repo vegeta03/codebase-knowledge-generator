@@ -71,14 +71,18 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     # Check which model provider to use
     model_provider = os.getenv("MODEL_PROVIDER", "groq").lower()
     
-    if is_verbose:
-        print(f"Using model provider: {model_provider}")
-    
-    # Call the appropriate LLM API based on the provider
+    # Determine which model will be used based on provider
     if model_provider == "openrouter":
+        model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+        print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}]")
         response_text = _call_openrouter(prompt)
     else:  # Default to groq
+        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+        print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}]")
         response_text = _call_groq(prompt)
+        
+    if is_verbose:
+        print(f"Additional debug info - Using model provider: {model_provider}")
 
     # Log the response
     logger.info(f"RESPONSE: {response_text}")
@@ -239,23 +243,15 @@ def _call_openrouter(prompt: str) -> str:
         # OpenRouter will still work without site information
         extra_headers = {}
         
-        # Check if fallback models are specified
-        fallback_models = os.getenv("OPENROUTER_FALLBACK_MODELS", "")
+        # We're not using fallback models anymore as requested
         extra_body = {}
-        if fallback_models:
-            # Convert comma-separated string to list
-            models_list = [m.strip() for m in fallback_models.split(",")]
-            if is_verbose:
-                print(f"Using fallback models: {models_list}")
-            extra_body["models"] = models_list
         
         chat_completion = client.chat.completions.create(
             model=model,
             messages=[
                 {"role": "user", "content": prompt}
             ],
-            extra_headers=extra_headers,
-            **extra_body
+            extra_headers=extra_headers
         )
         
         # Calculate and log response time in verbose mode

@@ -276,6 +276,8 @@ Instructions for the chapter (Generate content in {language.capitalize()} unless
 
 - Ensure the tone is welcoming and easy for a seasoned sofware developer professional to understand{tone_note}.
 
+- IMPORTANT: DO NOT include any content related to unit tests or end-to-end (e2e) tests in the tutorial. Focus exclusively on explaining the abstractions, concepts, and how to use them without test coverage discussions.
+
 - Output *only* the Markdown content for this chapter.
 
 Now, directly provide a "technical" and "Computer Science"-friendly Markdown output (DON'T need ```markdown``` tags):
