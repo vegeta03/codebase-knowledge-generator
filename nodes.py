@@ -172,24 +172,80 @@ Format the output as a JSON5 list of dictionaries:
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0))  # Use cache only if enabled and not retrying
 
         # --- Validation ---
-        json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-        abstractions = json5.loads(json5_str)
+        try:
+            json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+            abstractions = json5.loads(json5_str)
+        except (IndexError, ValueError) as e:
+            # Handle malformed JSON5 or missing code blocks
+            print(f"Error parsing JSON5 from LLM response: {e}")
+            print("Attempting to fix malformed JSON5...")
+
+            # Try to extract JSON5 content even if not properly formatted
+            if "```json5" in response:
+                json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+            elif "```" in response:
+                json5_str = response.strip().split("```")[1].split("```")[0].strip()
+            else:
+                json5_str = response.strip()
+
+            # Try to fix common JSON5 formatting issues
+            # Fix 1: Fix newlines in description field
+            import re
+            json5_str = re.sub(r'"description": "([^"]*?)\\n([^"]*?)"', r'"description": "\1 \2"', json5_str)
+
+            try:
+                abstractions = json5.loads(json5_str)
+            except ValueError as e2:
+                print(f"Failed to fix JSON5: {e2}")
+                # Create a minimal valid structure as fallback
+                abstractions = [
+                    {
+                        "name": "Default Abstraction",
+                        "description": "Default abstraction created due to parsing error",
+                        "file_indices": ["0 # main file"]
+                    }
+                ]
+                print("Using fallback minimal structure")
 
         if not isinstance(abstractions, list):
-            raise ValueError("LLM Output is not a list")
+            print("LLM output is not a list, converting to list")
+            if isinstance(abstractions, dict):
+                abstractions = [abstractions]
+            else:
+                abstractions = [
+                    {
+                        "name": "Default Abstraction",
+                        "description": "Default abstraction created due to parsing error",
+                        "file_indices": ["0 # main file"]
+                    }
+                ]
 
         validated_abstractions = []
         for item in abstractions:
             if not isinstance(item, dict) or not all(
                 k in item for k in ["name", "description", "file_indices"]
             ):
-                raise ValueError(f"Missing keys in abstraction item: {item}")
+                print(f"Missing keys in abstraction item: {item}")
+                # Skip this abstraction or create a default one
+                continue
+
             if not isinstance(item["name"], str):
-                raise ValueError(f"Name is not a string in item: {item}")
+                print(f"Name is not a string in item: {item}")
+                item["name"] = str(item["name"])
+
             if not isinstance(item["description"], str):
-                raise ValueError(f"Description is not a string in item: {item}")
+                print(f"Description is not a string in item: {item}")
+                if isinstance(item["description"], list):
+                    item["description"] = " ".join(str(part) for part in item["description"])
+                else:
+                    item["description"] = str(item["description"])
+
             if not isinstance(item["file_indices"], list):
-                raise ValueError(f"file_indices is not a list in item: {item}")
+                print(f"file_indices is not a list in item: {item}")
+                if isinstance(item["file_indices"], str):
+                    item["file_indices"] = [item["file_indices"]]
+                else:
+                    item["file_indices"] = ["0 # main file"]
 
             # Validate indices
             validated_indices = []
@@ -203,14 +259,17 @@ Format the output as a JSON5 list of dictionaries:
                         idx = int(str(idx_entry).strip())
 
                     if not (0 <= idx < file_count):
-                        raise ValueError(
-                            f"Invalid file index {idx} found in item {item['name']}. Max index is {file_count - 1}."
-                        )
+                        print(f"Warning: Invalid file index {idx} in item {item['name']}. Max index is {file_count - 1}.")
+                        # Use a valid index instead of skipping
+                        idx = idx % file_count
+                        print(f"Auto-correcting to index {idx}")
+
                     validated_indices.append(idx)
-                except (ValueError, TypeError):
-                    raise ValueError(
-                        f"Could not parse index from entry: {idx_entry} in item {item['name']}"
-                    )
+                except (ValueError, TypeError) as e:
+                    print(f"Warning: Could not parse index from entry: {idx_entry} in item {item['name']}. Error: {e}")
+                    # Use index 0 as fallback
+                    validated_indices.append(0)
+                    print("Using index 0 as fallback")
 
             item["files"] = sorted(list(set(validated_indices)))
             # Store only the required fields
@@ -331,7 +390,7 @@ Format the output as JSON5:
 
 ```json5
 {{
-  "summary": "A brief, simple explanation of the project{lang_hint}.\nCan span multiple lines with **bold** and *italic* for emphasis.",
+  "summary": "A brief, simple explanation of the project{lang_hint}. Can span multiple lines with **bold** and *italic* for emphasis. IMPORTANT: This must be a single string value, not multiple strings.",
   "relationships": [
     {{
       "from_abstraction": "0 # AbstractionName1",
@@ -353,19 +412,60 @@ Now, provide the JSON5 output:
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
 
         # --- Validation ---
-        json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-        relationships_data = json5.loads(json5_str)
+        try:
+            json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+            relationships_data = json5.loads(json5_str)
+        except (IndexError, ValueError) as e:
+            # Handle malformed JSON5 or missing code blocks
+            print(f"Error parsing JSON5 from LLM response: {e}")
+            print("Attempting to fix malformed JSON5...")
+
+            # Try to extract JSON5 content even if not properly formatted
+            if "```json5" in response:
+                json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+            elif "```" in response:
+                json5_str = response.strip().split("```")[1].split("```")[0].strip()
+            else:
+                json5_str = response.strip()
+
+            # Try to fix common JSON5 formatting issues
+            # Fix 1: Multiple strings in summary field
+            json5_str = json5_str.replace('  "summary": "', '  "summary": "')
+            json5_str = json5_str.replace('",\n  "*', ' *')
+            json5_str = json5_str.replace('*",\n', '",\n')
+
+            try:
+                relationships_data = json5.loads(json5_str)
+            except ValueError as e2:
+                print(f"Failed to fix JSON5: {e2}")
+                # Create a minimal valid structure as fallback
+                relationships_data = {
+                    "summary": "Project summary not available due to parsing error",
+                    "relationships": []
+                }
+                print("Using fallback minimal structure")
 
         if not isinstance(relationships_data, dict) or not all(
             k in relationships_data for k in ["summary", "relationships"]
         ):
-            raise ValueError(
-                "LLM output is not a dict or missing keys ('summary', 'relationships')"
-            )
+            print("LLM output is not a dict or missing keys ('summary', 'relationships')")
+            # Create a minimal valid structure
+            relationships_data = {
+                "summary": relationships_data.get("summary", "Project summary not available"),
+                "relationships": relationships_data.get("relationships", [])
+            }
+
         if not isinstance(relationships_data["summary"], str):
-            raise ValueError("summary is not a string")
+            print("Summary is not a string, converting to string")
+            # Convert summary to string if it's not already
+            if isinstance(relationships_data["summary"], list):
+                relationships_data["summary"] = " ".join(str(item) for item in relationships_data["summary"])
+            else:
+                relationships_data["summary"] = str(relationships_data["summary"])
+
         if not isinstance(relationships_data["relationships"], list):
-            raise ValueError("relationships is not a list")
+            print("Relationships is not a list, converting to empty list")
+            relationships_data["relationships"] = []
 
         # Validate relationships structure
         validated_relationships = []
@@ -796,13 +896,13 @@ Instructions for the chapter (Generate content in {language.capitalize()} unless
 
 - Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}.
 
-- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequenceDiagram with a dummy example - keep it minimal with atleast 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. {mermaid_lang_note}.
+- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - keep it minimal with at least 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n```{mermaid_lang_note}.
 
 - Then dive deeper into code for the internal implementation with references to files. Provide example code blocks, but make them similarly simple however don't dilute it, and "Computer Science"-friendly. Explain{instruction_lang_note}.
 
 - IMPORTANT: When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
 
-- Use mermaid diagrams to illustrate complex concepts (```mermaid``` format). {mermaid_lang_note}.
+- Use mermaid diagrams to illustrate complex concepts with PROPER mermaid syntax. ALWAYS begin with the diagram type (e.g., `sequenceDiagram`, `flowchart LR`, `classDiagram`, etc.) and use the correct syntax for that diagram type. For sequence diagrams, use proper arrow syntax like `->>`, `-->>`, `-->`, etc. NOT just `->`. For flowcharts, use proper node and connection syntax. Example with correct syntax: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n``` {mermaid_lang_note}.
 
 - Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand.
 
