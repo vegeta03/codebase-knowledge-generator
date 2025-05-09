@@ -14,9 +14,23 @@ dotenv.load_dotenv(override=True)
 
 # Default file patterns
 DEFAULT_INCLUDE_PATTERNS = {
+    # Programming languages
     "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.go", "*.java", "*.pyi", "*.pyx",
     "*.c", "*.cc", "*.cpp", "*.h", "*.md", "*.rst", "Dockerfile",
     "Makefile", "*.yaml", "*.yml",
+    
+    # Angular/TypeScript/NgRx specific files
+    "*.json", "*.html", "*.css", "*.scss", "*.sass", "*.less",
+    "*.service.ts", "*.component.ts", "*.module.ts", "*.pipe.ts",
+    "*.directive.ts", "*.guard.ts", "*.resolver.ts", "*.interceptor.ts",
+    "*.store.ts", "*.effects.ts", "*.reducer.ts", "*.actions.ts", "*.model.ts",
+    "*.config.ts", "*.routes.ts", "*.d.ts", "*.environment.ts",
+    
+    # Nx specific files
+    "project.json", "nx.json", "tsconfig*.json",
+    
+    # Config files
+    ".eslintrc*", ".prettierrc*", ".editorconfig", ".angular*",
 }
 
 DEFAULT_EXCLUDE_PATTERNS = {
@@ -29,16 +43,15 @@ DEFAULT_EXCLUDE_PATTERNS = {
     # Virtual environments
     "venv/*", ".venv/*",
     
-    # Angular/TypeScript specific test files
-    "*.spec.ts", "**/test-setup.ts", "**/*-e2e/**",
-    "**/apps/*-e2e/**", "**/e2e/**", "**/*test*/**",
+    # Angular/TypeScript specific test files - ONLY exclude spec files, not entire directories
+    "*.spec.ts", "**/test-setup.ts", "**/apps/*-e2e/**", "**/e2e/**",
     
     # Build and output directories
     "dist/*", "build/*", "experimental/*", "deprecated/*", "misc/*",
-    "legacy/*", "v1/*", "obj/*", "bin/*",
+    "obj/*", "bin/*",
     
-    # System and IDE directories
-    ".git/*", ".github/*", ".next/*", ".vscode/*", "node_modules/*",
+    # System directories
+    ".git/*", "node_modules/*",
     
     # Log files
     "*.log"
