@@ -3,7 +3,7 @@ import os
 import argparse
 import logging
 
-# Import the keyboard handler to enable ESC key termination
+# Import the keyboard handler to enable Ctrl+Q key termination
 from utils.keyboard_handler import setup_exit_handler
 
 # Apply joblib patch before importing any modules that might use joblib
@@ -154,7 +154,7 @@ def main():
     if args.verbose:
         print("Verbose logging: Enabled")
         
-    # Setup keyboard handler to allow ESC key termination at any time
+    # Setup keyboard handler to allow Ctrl+Q key termination at any time
     keyboard_thread = setup_exit_handler()
 
     # Create the flow instance
