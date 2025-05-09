@@ -2,6 +2,11 @@ import dotenv
 import os
 import argparse
 import logging
+
+# Apply joblib patch before importing any modules that might use joblib
+from joblib_patch import apply_joblib_patches
+apply_joblib_patches()
+
 # Import the function that creates the flow
 from flow import create_tutorial_flow
 
@@ -48,6 +53,11 @@ def main():
 
     # Configure logging based on verbose flag
     log_level = logging.DEBUG if args.verbose else logging.INFO
+
+    # Reset logging configuration (in case it was configured by the patch)
+    for handler in logging.root.handlers[:]:
+        logging.root.removeHandler(handler)
+
     logging.basicConfig(
         level=log_level,
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -55,6 +65,9 @@ def main():
             logging.StreamHandler()  # Output to console
         ]
     )
+
+    # Set the level for the joblib_patch logger specifically
+    logging.getLogger('joblib_patch').setLevel(log_level)
 
     # Create logger for this module
     logger = logging.getLogger(__name__)
