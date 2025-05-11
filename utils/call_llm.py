@@ -85,11 +85,11 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     # Determine which model will be used based on provider
     if model_provider == "openrouter":
         model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-        print(f" LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
+        print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
         response_text = _call_openrouter(prompt, stream=stream)
     else:  # Default to groq
         model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        print(f" LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
+        print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
         response_text = _call_groq(prompt, stream=stream)
         
     if is_verbose:
