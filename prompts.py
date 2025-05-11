@@ -42,6 +42,8 @@ For each abstraction, provide:
 2. A "technical" and "computer science" centric `description` explaining what it is with a real-world and practical analogy, in atleast 100 words or more if required{desc_lang_hint}.
 3. A list of relevant `file_indices` (integers) using the format `idx # path/comment`.
 
+CRITICAL INSTRUCTION: Your primary task is to identify maximum number of core functional abstractions of the application. You MUST NOT identify any form of software testing (including but not limited to unit tests, integration tests, end-to-end (E2E) tests, performance tests, etc.), testing frameworks, test runners, test utilities, or any code, files, or concepts primarily related to testing as an abstraction. If you encounter testing-related elements, ignore them for the purpose of abstraction identification. Focus exclusively on the application's runtime behavior, business logic, and core architectural components.
+
 List of file indices and paths present in the context:
 {file_listing_for_prompt}
 
@@ -117,6 +119,7 @@ IMPORTANT INSTRUCTIONS:
 3. Use ONLY the abstraction indices (0 to {num_abstractions-1}) from the list above, NOT file indices.
 4. Do NOT use file indices or project names in the relationships.
 5. The indices in from_abstraction and to_abstraction must be between 0 and {num_abstractions-1} inclusive.
+6. Exclude any relationships that are solely testing-related. Do not focus on test frameworks, testing utilities, or test implementations when analyzing relationships.
 
 Format the output as JSON5:
 
@@ -172,6 +175,8 @@ Context about relationships and project summary:
 
 If you are going to make a tutorial for ```` {project_name} ````, what is the best order to explain these abstractions, from first to last?
 Ideally, first explain those that are the most important or foundational, perhaps user-facing concepts or entry points. Then move to more detailed, lower-level implementation details or supporting concepts.
+
+IMPORTANT: Do not prioritize testing frameworks, test utilities, or any testing-related abstractions in your ordering. Focus on explaining the core functionality of the application rather than how to test it.
 
 Output the ordered list of abstraction indices, including the name in a comment for clarity. Use the format `idx # AbstractionName`.
 
@@ -276,7 +281,7 @@ Instructions for the chapter (Generate content in {language.capitalize()} unless
 
 - Ensure the tone is welcoming and easy for a seasoned sofware developer professional to understand{tone_note}.
 
-- IMPORTANT: DO NOT include any content related to unit tests or end-to-end (e2e) tests in the tutorial. Focus exclusively on explaining the abstractions, concepts, and how to use them without test coverage discussions.
+- IMPORTANT: DO NOT include any content related to unit tests, end-to-end (e2e) tests, integration tests, or any other types of testing in the tutorial. Skip all testing-related code and explanations. Focus exclusively on explaining the abstractions, concepts, and how to use them without any test coverage discussions.
 
 - Output *only* the Markdown content for this chapter.
 

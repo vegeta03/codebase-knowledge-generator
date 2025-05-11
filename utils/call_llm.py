@@ -85,11 +85,11 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     # Determine which model will be used based on provider
     if model_provider == "openrouter":
         model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-        print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
+        print(f" LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
         response_text = _call_openrouter(prompt, stream=stream)
     else:  # Default to groq
         model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
+        print(f" LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
         response_text = _call_groq(prompt, stream=stream)
         
     if is_verbose:
@@ -142,7 +142,7 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
     # Check if system prompt should be used
     use_system_prompt = os.getenv("USE_SYSTEM_PROMPT", "False").lower() in ["true", "1", "yes"]
     system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
-    
+
     if is_verbose:
         print(f"Using Groq LLM model: {model}")
         print(f"Streaming mode: {'Enabled' if stream else 'Disabled'}")
@@ -176,6 +176,10 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
             # Prepare messages list based on system prompt setting
             messages = []
             if use_system_prompt:
+                # Ensure critical anti-testing instruction is part of the system prompt
+                anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+                if anti_testing_instruction not in system_prompt:
+                    system_prompt += anti_testing_instruction
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
             
@@ -204,6 +208,10 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
             # Prepare messages list based on system prompt setting
             messages = []
             if use_system_prompt:
+                # Ensure critical anti-testing instruction is part of the system prompt
+                anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+                if anti_testing_instruction not in system_prompt:
+                    system_prompt += anti_testing_instruction
                 messages.append({"role": "system", "content": system_prompt})
             messages.append({"role": "user", "content": prompt})
             
@@ -257,14 +265,18 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
     root_logger = logging.getLogger()
     is_verbose = root_logger.level <= logging.DEBUG
     
-    # Get API key and model from environment variables
+    # Get API key, model and fallback models from environment variables
     api_key = os.getenv("OPENROUTER_API_KEY", "")
-    model = os.getenv("OPENROUTER_MODEL", "openai/gpt-4o")
-    
+    model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+    fallback_models_str = os.getenv("OPENROUTER_FALLBACK_MODELS", "")
+    fallback_models = [fm.strip() for fm in fallback_models_str.split(',') if fm.strip()] if fallback_models_str else []
+
     # Check if system prompt should be used
     use_system_prompt = os.getenv("USE_SYSTEM_PROMPT", "False").lower() in ["true", "1", "yes"]
-    system_prompt = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
+    system_prompt_content = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
     
+    all_models_to_try = [model] + fallback_models
+
     if is_verbose:
         print(f"Using OpenRouter with model: {model}")
         print(f"Streaming mode: {'Enabled' if stream else 'Disabled'}")
@@ -307,7 +319,11 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
             # Prepare messages list based on system prompt setting
             messages = []
             if use_system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Ensure critical anti-testing instruction is part of the system prompt
+                anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+                if anti_testing_instruction not in system_prompt_content:
+                    system_prompt_content += anti_testing_instruction
+                messages.append({"role": "system", "content": system_prompt_content})
             messages.append({"role": "user", "content": prompt})
             
             stream_response = client.chat.completions.create(
@@ -335,8 +351,15 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
             # Prepare messages list based on system prompt setting
             messages = []
             if use_system_prompt:
-                messages.append({"role": "system", "content": system_prompt})
+                # Ensure critical anti-testing instruction is part of the system prompt
+                anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+                if anti_testing_instruction not in system_prompt_content:
+                    system_prompt_content += anti_testing_instruction
+                messages.append({"role": "system", "content": system_prompt_content})
             messages.append({"role": "user", "content": prompt})
+
+            if is_verbose:
+                print(f"Attempting with model: {current_model}")
             
             chat_completion = client.chat.completions.create(
                 model=model,
@@ -377,61 +400,6 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
         else:
             # Re-raise other exceptions
             raise
-
-#     # OpenRouter API configuration
-#     api_key = os.getenv("OPENROUTER_API_KEY", "")
-#     model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-    
-#     headers = {
-#         "Authorization": f"Bearer {api_key}",
-#     }
-
-#     data = {
-#         "model": model,
-#         "messages": [{"role": "user", "content": prompt}]
-#     }
-
-#     response = requests.post(
-#         "https://openrouter.ai/api/v1/chat/completions",
-#         headers=headers,
-#         json=data
-#     )
-
-#     if response.status_code != 200:
-#         error_msg = f"OpenRouter API call failed with status {response.status_code}: {response.text}"
-#         logger.error(error_msg)
-#         raise Exception(error_msg)
-#     try:
-#         response_text = response.json()["choices"][0]["message"]["content"]
-#     except Exception as e:
-#         error_msg = f"Failed to parse OpenRouter response: {e}; Response: {response.text}"
-#         logger.error(error_msg)        
-#         raise Exception(error_msg)
-    
-
-#     # Log the response
-#     logger.info(f"RESPONSE: {response_text}")
-
-#     # Update cache if enabled
-#     if use_cache:
-#         # Load cache again to avoid overwrites
-#         cache = {}
-#         if os.path.exists(cache_file):
-#             try:
-#                 with open(cache_file, "r") as f:
-#                     cache = json.load(f)
-#             except:
-#                 pass
-
-#         # Add to cache and save
-#         cache[prompt] = response_text
-#         try:
-#             with open(cache_file, "w") as f:
-#                 json.dump(cache, f)
-#         except Exception as e:
-#             logger.error(f"Failed to save cache: {e}")
-
-#     return response_text
 
 if __name__ == "__main__":
     test_prompt = "Hello, how are you?"

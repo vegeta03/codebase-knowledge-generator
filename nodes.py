@@ -1122,9 +1122,15 @@ class CombineTutorial(Node):
 
         # Write chapter files
         for chapter_info in chapter_files:
+            chapter_content = chapter_info["content"]
+            
+            # Remove <think></think> tags and their content from the chapter
+            import re
+            chapter_content = re.sub(r'<think>.*?</think>', '', chapter_content, flags=re.DOTALL)
+            
             chapter_filepath = os.path.join(output_path, chapter_info["filename"])
             with open(chapter_filepath, "w", encoding="utf-8") as f:
-                f.write(chapter_info["content"])
+                f.write(chapter_content)
             print(f"  - Wrote {chapter_filepath}")
 
         return output_path # Return the final path
