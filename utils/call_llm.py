@@ -265,17 +265,13 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
     root_logger = logging.getLogger()
     is_verbose = root_logger.level <= logging.DEBUG
     
-    # Get API key, model and fallback models from environment variables
+    # Get API key and model from environment variables
     api_key = os.getenv("OPENROUTER_API_KEY", "")
     model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-    fallback_models_str = os.getenv("OPENROUTER_FALLBACK_MODELS", "")
-    fallback_models = [fm.strip() for fm in fallback_models_str.split(',') if fm.strip()] if fallback_models_str else []
 
     # Check if system prompt should be used
     use_system_prompt = os.getenv("USE_SYSTEM_PROMPT", "False").lower() in ["true", "1", "yes"]
     system_prompt_content = os.getenv("SYSTEM_PROMPT", "You are a helpful assistant.")
-    
-    all_models_to_try = [model] + fallback_models
 
     if is_verbose:
         print(f"Using OpenRouter with model: {model}")
@@ -359,7 +355,7 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
             messages.append({"role": "user", "content": prompt})
 
             if is_verbose:
-                print(f"Attempting with model: {current_model}")
+                print(f"Attempting with model: {model}")
             
             chat_completion = client.chat.completions.create(
                 model=model,
