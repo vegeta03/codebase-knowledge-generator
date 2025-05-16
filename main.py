@@ -20,113 +20,29 @@ dotenv.load_dotenv(override=True)
 
 # Default file patterns
 DEFAULT_INCLUDE_PATTERNS = {
-    # High-value pattern strategy - semantic prioritization
-    # 1. Core application source files
-    # Language-specific source files
-    "**/*.py", "**/*.js", "**/*.jsx", "**/*.ts", "**/*.tsx", "**/*.go", 
-    "**/*.java", "**/*.rs", "**/*.cs", "**/*.fs", "**/*.kt", "**/*.scala",
-    "**/*.c", "**/*.cpp", "**/*.h", "**/*.hpp", 
-    
-    # 2. Architecture definition files
-    # Web/UI frameworks
-    "**/*.component.*", "**/*.directive.*", "**/*.guard.*", "**/*.pipe.*", 
-    "**/*.service.*", "**/*.module.*", "**/*.interceptor.*", "**/*.resolver.*",
-    # State management
-    "**/*.store.*", "**/*.reducer.*", "**/*.action.*", "**/*.effect.*", 
-    "**/*.selector.*", "**/*.state.*", "**/*.model.*", "**/*.entity.*",
-    # API/backend
-    "**/*.controller.*", "**/*.repository.*", "**/*.dao.*", "**/*.dto.*", 
-    "**/*.service.*", "**/*.middleware.*", "**/*.filter.*", "**/*.route.*", 
-    "**/*.handler.*",
-    
-    # 3. Configuration files (high-value for understanding architecture)
-    # Project configuration
-    "package.json", "tsconfig*.json", "*.csproj", "*.fsproj", "*.sln", 
-    "pom.xml", "build.gradle*", "settings.gradle*", "Cargo.toml", "go.mod",
-    "setup.py", "pyproject.toml", "requirements.txt", "poetry.lock",
-    "Makefile", "CMakeLists.txt", "Dockerfile*", "docker-compose*.y*ml",
-    # Framework configuration
-    ".babelrc*", "babel.config.*", "webpack.config.*", "rollup.config.*",
-    "next.config.*", "nuxt.config.*", "angular.json", "vue.config.*",
-    "nx.json", "project.json", "workspace.json",
-    # Environment and application settings
-    ".env.example", "**/*.env.example", "application*.yml", "application*.yaml", 
-    "application*.properties", "appsettings*.json", "app.config.*",
-    "**/*.environment.ts", "**/config/**",
-    
-    # 4. Definition and declaration files
-    "**/*.d.ts", "**/*.proto", "**/*.graphql", "**/*.schema.*", 
-    "**/*.avsc", "**/*.thrift",
-    
-    # 5. Templates and views
-    "**/*.html", "**/*.cshtml", "**/*.jsp", "**/*.jspx", "**/*.ejs", 
-    "**/*.hbs", "**/*.mustache", "**/*.twig", "**/*.erb", "**/*.razor",
-    
-    # 6. Style files
-    "**/*.css", "**/*.scss", "**/*.sass", "**/*.less", "**/*.styl",
-    
-    # 7. Documentation
-    "README*", "CHANGELOG*", "**/docs/**/*.md",
-    
-    # 8. Scripts and tooling
-    "scripts/*.{js,ts,sh,py}", "tools/**/*.{js,ts,sh,py}"
+    "*.py", "*.js", "*.jsx", "*.ts", "*.tsx", "*.go", "*.java", "*.pyi", "*.pyx",
+    "*.c", "*.cc", "*.cpp", "*.h", "*.md", "*.rst", "Dockerfile",
+    "Makefile", "*.yaml", "*.yml", "*.html", "*.scss", "*.css", "*.json",
 }
 
-
 DEFAULT_EXCLUDE_PATTERNS = {
-    # Core test pattern strategy - multi-layered approach
-    # 1. Directory-based exclusion (broad coverage)
-    "**/test/**", "**/tests/**", "**/spec/**", "**/specs/**", 
-    "**/__test__/**", "**/__tests__/**", "**/__spec__/**", "**/__specs__/**",
-    "**/testing/**", "**/__testing__/**", "**/e2e/**", "**/e2e-tests/**", 
-    "**/*-e2e/**", "**/integration-tests/**", "**/it/**", "**/fixtures/**", 
+    # Asset directories
+    "assets/*", "data/*", "examples/*", "images/*", "public/*", "static/*", "temp/*",
     
-    # 2. Framework-specific test directories (thorough coverage)
-    # Jest, Mocha, Jasmine
-    "**/__mocks__/**", "**/mocks/**", "**/__stubs__/**", "**/stubs/**", 
-    "**/__snapshots__/**", "**/__fixtures__/**", "**/__helpers__/**",
-    # Common test utility directories
-    "**/test-utils/**", "**/test-helpers/**", "**/test-setup/**",
-    "**/test-support/**", "**/test-common/**", "**/testdata/**",
-    # Testing tools
-    "cypress/**", "playwright/**", "**/selenium/**", "**/webdriver/**",
-    "**/cucumber/**", "**/protractor/**", "**/puppeteer/**", "**/vitest/**",
-    "**/karma/**", "**/jest/**",
+    # Documentation
+    "docs/*", 
     
-    # 3. Filename-based exclusion (extension patterns)
-    # JavaScript/TypeScript
-    "**/*.test.*", "**/*.spec.*", "**/*_test.*", "**/*_spec.*", "**/*-test.*", 
-    "**/*-spec.*", "**/*.cy.*", "**/*.e2e.*", "**/*e2e-spec.*", "**/*-it.*",
-    # Java
-    "**/*Test.java", "**/*Tests.java", "**/*IT.java", "**/*ITCase.java",
-    "**/*TestCase.java", "**/Test*.java",
-    # Go
-    "**/*_test.go",
-    # Rust
-    "**/*_test.rs",
-    # C#
-    "**/*Test.cs", "**/*Tests.cs", "**/*.Test/**", "**/*.Tests/**",
+    # Environment and dependencies
+    "venv/*", ".venv/*", "dist/*", "build/*", "node_modules/*",
     
-    # 4. Test configuration files
-    "**/jest.config.*", "**/karma.conf.*", "**/karma.config.*", "**/mocha.opts",
-    "**/.mocharc.*", "**/cypress.config.*", "**/playwright.config.*",
-    "**/vitest.config.*", "**/ava.config.*", "**/jasmine.json",
-    "**/protractor.conf.*", "**/testng.xml", "**/junit.xml",
-    "**/*.postman_collection.json", "**/test.setup.*", "**/test-setup.*",
+    # Testing-specific patterns
+    "*.spec.*", "*.test.*", "*-e2e/*", "**/test-setup.ts", 
+    "jest.config.*", "jest.preset.*", "**/tests/*", "**/testing/*",
     
-    # Resource and asset directories (minimal scope)
-    "assets/", "static/fonts/**", "static/images/**", "dist/**", "build/**", 
-    "out/**", "target/**", ".next/**", ".nuxt/**", "node_modules/**",
-    
-    # System and IDE directories
-    ".git/**", ".github/**", ".idea/**", ".vscode/**", ".vs/**", ".gradle/**",
-    
-    # Log and cache directories
-    "logs/**", "coverage/**", ".nyc_output/**", "reports/**", "**/__pycache__/**",
-    ".pytest_cache/**", ".eslintcache", "**/*.log",
-    
-    # Temporary and experimental
-    "**/temp/**", "**/tmp/**", "**/experimental/**", "**/deprecated/**"
+    # Generated, outdated, and config directories
+    "experimental/*", "deprecated/*", "misc/*", "legacy/*", 
+    ".git/*", ".github/*", ".next/*", ".vscode/*", ".nx/*", 
+    "obj/*", "bin/*", "*.log"
 }
 
 
