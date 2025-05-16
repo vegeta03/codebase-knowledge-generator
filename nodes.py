@@ -309,8 +309,8 @@ class IdentifyAbstractions(Node):
                         file_paths.append(prep_res[1][int(idx)][1])
                 print(f"     Found in {len(file_paths)} files")
         
-        # Make sure we return the shared dictionary - this is crucial
-        return shared
+        # Return a string action instead of the shared dictionary
+        return "default"
 
 class AnalyzeRelationships(Node):
     def prep(self, shared):
@@ -639,6 +639,7 @@ Now, provide the JSON5 output:
         # Structure is now {"summary": str, "details": [{"from": int, "to": int, "label": str}]}
         # Summary and label might be translated
         shared["relationships"] = exec_res
+        return "default"
 
 class OrderChapters(Node):
     def prep(self, shared):
@@ -826,6 +827,7 @@ Now, provide the JSON5 output:
     def post(self, shared, prep_res, exec_res):
         # exec_res is already the list of ordered indices
         shared["chapter_order"] = exec_res  # List of indices
+        return "default"
 
 
 class WriteChapters(BatchNode):
@@ -1043,6 +1045,7 @@ Now, directly provide a "technical" and "Computer Science"-friendly Markdown out
         # Clean up the temporary instance variable
         del self.chapters_written_so_far
         print(f"Finished writing {len(exec_res_list)} chapters.")
+        return "default"
 
 class CombineTutorial(Node):
     def prep(self, shared):
@@ -1179,3 +1182,4 @@ class CombineTutorial(Node):
     def post(self, shared, prep_res, exec_res):
         shared["final_output_dir"] = exec_res # Store the output path
         print(f"\nTutorial generation complete! Files are in: {exec_res}")
+        return "default"
