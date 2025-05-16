@@ -5,6 +5,8 @@ from pocketflow import Node, BatchNode
 from utils.crawl_github_files import crawl_github_files
 from utils.call_llm import call_llm
 from utils.crawl_local_files import crawl_local_files
+from utils.code_chunking import chunk_codebase
+from utils.chunk_processor import process_code_for_llm, batch_process_chunks, estimate_model_calls
 
 # Helper to get content for specific file indices
 def get_content_for_indices(files_data, indices):
@@ -82,44 +84,54 @@ class IdentifyAbstractions(Node):
         files_data = shared["files"]
         project_name = shared["project_name"]  # Get project name
         language = shared.get("language", "english") # Get language
-        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to True
-
-        # Helper to create context from files, respecting limits (basic example)
-        def create_llm_context(files_data):
-            context = ""
-            file_info = [] # Store tuples of (index, path)
-            for i, (path, content) in enumerate(files_data):
-                entry = f"--- File Index {i}: {path} ---\n{content}\n\n"
-                context += entry
-                file_info.append((i, path))
-
-            return context, file_info # file_info is list of (index, path)
-
-        context, file_info = create_llm_context(files_data)
+        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to False
+        base_dir = shared.get("local_dir") or os.getcwd()  # Get base directory
+        
+        # Convert files_data to the format expected by the chunking system
+        file_paths = []
+        file_contents = {}
+        file_info = []  # Store tuples of (index, path)
+        
+        for i, (path, content) in enumerate(files_data):
+            file_paths.append(path)
+            file_contents[path] = content
+            file_info.append((i, path))
+        
         # Format file info for the prompt (comment is just a hint for LLM)
         file_listing_for_prompt = "\n".join(
             [f"- {idx} # {path}" for idx, path in file_info]
         )
+        
+        # Create a prompt template for identifying abstractions
+        prompt_template = self._create_prompt_template(project_name, language, file_listing_for_prompt)
+        
+        # Estimate model usage for logging purposes
+        estimation = estimate_model_calls(file_paths, file_contents)
+        print(f"Estimated code tokens: {estimation['estimated_code_tokens']}")
+        print(f"Estimated chunks: {estimation['estimated_chunks']}")
+        print(f"Estimated total tokens: {estimation['total_tokens']}")
+        print(f"Using model context length: {estimation['model_context_length']} tokens")
+        print(f"Reserving 20% ({int(estimation['model_context_length']*0.2)} tokens) for model response")
+        
+        # Use the hierarchical AST-aware chunking system to prepare prompts
+        prompts = process_code_for_llm(
+            base_dir, 
+            file_paths, 
+            file_contents, 
+            prompt_template
+        )
+        
         return (
-            context,
-            file_listing_for_prompt,
+            prompts,
+            file_info,
             len(files_data),
             project_name,
             language,
             use_cache,
         )  # Return all parameters
-
-    def exec(self, prep_res):
-        (
-            context,
-            file_listing_for_prompt,
-            file_count,
-            project_name,
-            language,
-            use_cache,
-        ) = prep_res  # Unpack all parameters
-        print(f"Identifying abstractions using LLM...")
-
+    
+    def _create_prompt_template(self, project_name, language, file_listing_for_prompt):
+        """Create a prompt template for identifying abstractions."""
         # Add language instruction and hints only if not English
         language_instruction = ""
         name_lang_hint = ""
@@ -129,99 +141,93 @@ class IdentifyAbstractions(Node):
             # Keep specific hints here as name/description are primary targets
             name_lang_hint = f" (value in {language.capitalize()})"
             desc_lang_hint = f" (value in {language.capitalize()})"
+        
+        # The prompt template with {code} placeholder for the AST-aware chunked code
+        prompt_template = f"""You are a senior software engineer tasked with identifying the key abstractions in the '{project_name}' codebase to create a comprehensive tutorial. Focus on identifying core abstractions that represent the fundamental concepts and patterns in this codebase.\n\n{language_instruction}Analyze the following code files:\n\n{file_listing_for_prompt}\n\nCode content:\n\n{{code}}\n\nIdentify the 5-8 most important abstractions in this codebase. Important abstractions are critical concepts that help in understanding the codebase.\n\nFor each abstraction, include:\n- 'name'{name_lang_hint}: A concise, memorable title for the abstraction (2-5 words)\n- 'description'{desc_lang_hint}: A clear, concise explanation of what this abstraction is (1-2 sentences)\n- 'file_indices': List of file indices (from the file list above) where this abstraction is implemented or heavily used\n\nExample response format:\n```json\n[\n  {{\n    "name": "Data Processor",\n    "description": "Core component that transforms raw input data into structured information for analysis.",\n    "file_indices": [0, 3, 5]\n  }},\n  {{\n    "name": "Config Manager",\n    "description": "Handles application configuration across different environments.",\n    "file_indices": [1, 2]\n  }}\n]\n```\n\nInclude ONLY JSON in your response, with no additional text before or after."""
+        
+        return prompt_template
 
-        prompt = f"""
-For the project `{project_name}`:
+    def exec(self, prep_res):
+        (
+            prompts,
+            file_info,
+            file_count,
+            project_name,
+            language,
+            use_cache,
+        ) = prep_res  # Unpack all parameters
+        print(f"Identifying abstractions using LLM with hierarchical AST-aware chunking...")
+        print(f"Processing {len(prompts)} code chunks...")
 
-Codebase Context:
-{context}
-
-{language_instruction}Analyze the codebase context.
-Identify the complete and comprehensive core most important abstractions to help those new to the codebase.
-
-For each abstraction, provide:
-1. A concise `name`{name_lang_hint}.
-2. A "technical" and "computer science" centric `description` explaining what it is with a real-world and practical analogy, in atleast 100 words or more if required{desc_lang_hint}.
-3. A list of relevant `file_indices` (integers) using the format `idx # path/comment`.
-
-List of file indices and paths present in the context:
-{file_listing_for_prompt}
-
-Format the output as a JSON5 list of dictionaries:
-
-```json5
-[
-  {{
-    "name": "Query Processing{name_lang_hint}",
-    "description": "Explains what the abstraction does.\nIt's like a central dispatcher routing requests.{desc_lang_hint}",
-    "file_indices": [
-      "0 # path/to/file1.py",
-      "3 # path/to/related.py"
-    ]
-  }},
-  {{
-    "name": "Query Optimization{name_lang_hint}",
-    "description": "Another core concept, similar to a blueprint for objects.{desc_lang_hint}",
-    "file_indices": [
-      "5 # path/to/another.js"
-    ]
-  }}
-  // ... include all complete and comprehensive core most important abstractions
-]
-```"""
-        response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0))  # Use cache only if enabled and not retrying
-
-        # --- Validation ---
+        # Process all chunks and combine results
+        processed_results = batch_process_chunks(prompts, call_llm, use_cache=use_cache)
+        
+        # Extract and combine abstractions from all chunks
+        combined_abstractions = []
+        abstraction_tracker = {}  # Track abstractions by name to avoid duplicates
+        
         try:
-            json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-            abstractions = json5.loads(json5_str)
-        except (IndexError, ValueError) as e:
-            # Handle malformed JSON5 or missing code blocks
-            print(f"Error parsing JSON5 from LLM response: {e}")
-            print("Attempting to fix malformed JSON5...")
-
-            # Try to extract JSON5 content even if not properly formatted
-            if "```json5" in response:
-                json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-            elif "```" in response:
-                json5_str = response.strip().split("```")[1].split("```")[0].strip()
-            else:
-                json5_str = response.strip()
-
-            # Try to fix common JSON5 formatting issues
-            # Fix 1: Fix newlines in description field
-            import re
-            json5_str = re.sub(r'"description": "([^"]*?)\\n([^"]*?)"', r'"description": "\1 \2"', json5_str)
-
-            try:
-                abstractions = json5.loads(json5_str)
-            except ValueError as e2:
-                print(f"Failed to fix JSON5: {e2}")
-                # Create a minimal valid structure as fallback
-                abstractions = [
-                    {
-                        "name": "Default Abstraction",
-                        "description": "Default abstraction created due to parsing error",
-                        "file_indices": ["0 # main file"]
-                    }
-                ]
-                print("Using fallback minimal structure")
-
-        if not isinstance(abstractions, list):
-            print("LLM output is not a list, converting to list")
-            if isinstance(abstractions, dict):
-                abstractions = [abstractions]
-            else:
-                abstractions = [
-                    {
-                        "name": "Default Abstraction",
-                        "description": "Default abstraction created due to parsing error",
-                        "file_indices": ["0 # main file"]
-                    }
-                ]
-
+            for chunk_result in processed_results:
+                if "error" in chunk_result:
+                    print(f"Warning: Error processing chunk {chunk_result['chunk_id']}: {chunk_result['error']}")
+                    continue
+                    
+                # Get the response for this chunk
+                result = chunk_result['response']
+                
+                # Parse the JSON response
+                try:
+                    # Try to extract JSON from the response (it might have markdown code blocks)
+                    json_match = re.search(r'```json\s*(.+?)\s*```', result, re.DOTALL)
+                    if json_match:
+                        # Found JSON in a code block
+                        abstractions_json = json_match.group(1).strip()
+                    else:
+                        # Assume the entire response is JSON
+                        abstractions_json = result.strip()
+                        
+                    # Parse the JSON
+                    chunk_abstractions = json5.loads(abstractions_json)
+                    
+                    # Process each abstraction from this chunk
+                    for abstraction in chunk_abstractions:
+                        # Ensure required fields are present
+                        if not all(k in abstraction for k in ["name", "description", "file_indices"]):
+                            print(f"Warning: Skipping incomplete abstraction: {abstraction}")
+                            continue
+                            
+                        # Normalize the abstraction name for deduplication
+                        norm_name = abstraction["name"].lower().strip()
+                        
+                        if norm_name in abstraction_tracker:
+                            # Update existing abstraction
+                            existing = abstraction_tracker[norm_name]
+                            # Merge file indices (avoid duplicates)
+                            existing["file_indices"] = list(set(existing["file_indices"] + abstraction["file_indices"]))
+                        else:
+                            # Add new abstraction to tracker
+                            abstraction_tracker[norm_name] = abstraction
+                except Exception as e:
+                    print(f"Warning: Failed to parse abstractions from chunk {chunk_result['chunk_id']}: {e}")
+                    # Log the problematic response for debugging
+                    print(f"Response text: {result[:100]}...")
+            
+            # Convert the deduplicated abstractions to a list
+            combined_abstractions = list(abstraction_tracker.values())
+            
+            # Sort abstractions for consistent output
+            combined_abstractions.sort(key=lambda x: x["name"])
+            
+            print(f"Successfully extracted {len(combined_abstractions)} unique abstractions across all chunks")
+            
+        except Exception as e:
+            print(f"Error processing abstraction results: {e}")
+            # Return empty list in case of failure
+            combined_abstractions = []
+        
+        # Validate abstractions structure
         validated_abstractions = []
-        for item in abstractions:
+        for item in combined_abstractions:
             if not isinstance(item, dict) or not all(
                 k in item for k in ["name", "description", "file_indices"]
             ):
@@ -287,33 +293,67 @@ Format the output as a JSON5 list of dictionaries:
         return validated_abstractions
 
     def post(self, shared, prep_res, exec_res):
-        shared["abstractions"] = (
-            exec_res  # List of {"name": str, "description": str, "files": [int]}
-        )
+        # Store the combined abstractions in the shared context
+        shared["abstractions"] = exec_res
         
-        # List the identified abstractions by name
-        print("Identified abstractions:")
+        # Log summary of identified abstractions
+        print(f"Identified {len(exec_res)} abstractions:")
         for i, abstraction in enumerate(exec_res):
-            print(f"  {i+1}. {abstraction['name']}")
-
+            print(f"  {i+1}. {abstraction['name']}: {abstraction['description'][:60]}...")
+            file_indices = abstraction.get("file_indices", [])
+            if file_indices:
+                # Convert indices to file paths for better context
+                file_paths = []
+                for idx in file_indices:
+                    if isinstance(idx, (int, str)) and 0 <= int(idx) < len(prep_res[1]):
+                        file_paths.append(prep_res[1][int(idx)][1])
+                print(f"     Found in {len(file_paths)} files")
+        
+        # Make sure we return the shared dictionary - this is crucial
+        return shared
 
 class AnalyzeRelationships(Node):
     def prep(self, shared):
-        abstractions = shared[
-            "abstractions"
-        ]  # Now contains 'files' list of indices, name/description potentially translated
+        abstractions = shared["abstractions"]  # From IdentifyAbstractions
         files_data = shared["files"]
         project_name = shared["project_name"]  # Get project name
         language = shared.get("language", "english")  # Get language
-        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to True
+        use_cache = shared.get("use_cache", False)  # Get use_cache flag, default to False
 
         # Get the actual number of abstractions directly
         num_abstractions = len(abstractions)
-
+        
+        # Normalize the abstraction data structure to ensure consistent format
+        normalized_abstractions = []
+        for i, abstr in enumerate(abstractions):
+            normalized = {
+                "name": abstr.get("name", f"Abstraction {i}"),
+                "description": abstr.get("description", "No description provided"),
+                "files": []
+            }
+            
+            # Handle different formats of file indices
+            if "file_indices" in abstr:
+                # Convert all indices to integers where possible
+                for idx in abstr["file_indices"]:
+                    if isinstance(idx, (int, str)):
+                        try:
+                            normalized["files"].append(int(idx))
+                        except (ValueError, TypeError):
+                            # If there's a string that can't be converted to int, skip it
+                            pass
+            
+            normalized_abstractions.append(normalized)
+        
+        # Replace abstractions with normalized version
+        shared["abstractions"] = normalized_abstractions
+        abstractions = normalized_abstractions
+            
         # Create context with abstraction names, indices, descriptions, and relevant file snippets
         context = "Identified Abstractions:\\n"
         all_relevant_indices = set()
         abstraction_info_for_prompt = []
+        
         for i, abstr in enumerate(abstractions):
             # Use 'files' which contains indices directly
             file_indices_str = ", ".join(map(str, abstr["files"]))
@@ -322,7 +362,7 @@ class AnalyzeRelationships(Node):
             context += info_line + "\\n"
             abstraction_info_for_prompt.append(
                 f"{i} # {abstr['name']}"
-            )  # Use potentially translated name here too
+            )
             all_relevant_indices.update(abstr["files"])
 
         context += "\\nRelevant File Snippets (Referenced by Index and Path):\\n"

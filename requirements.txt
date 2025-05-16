@@ -10,3 +10,4 @@ tqdm
 json5
 openai
 keyboard
+tree-sitter-languages
