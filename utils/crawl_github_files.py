@@ -9,6 +9,7 @@ import joblib
 from tqdm import tqdm
 from typing import Union, Set, List, Dict, Tuple, Any
 from urllib.parse import urlparse
+from utils.file_filtering import should_process_file
 
 def crawl_github_files(
     repo_url, 
@@ -45,22 +46,10 @@ def crawl_github_files(
     if exclude_patterns and isinstance(exclude_patterns, str):
         exclude_patterns = {exclude_patterns}
 
-    def should_include_file(file_path: str, file_name: str) -> bool:
-        """Determine if a file should be included based on patterns"""
-        # If no include patterns are specified, include all files
-        if not include_patterns:
-            include_file = True
-        else:
-            # Check if file matches any include pattern
-            include_file = any(fnmatch.fnmatch(file_name, pattern) for pattern in include_patterns)
-
-        # If exclude patterns are specified, check if file should be excluded
-        if exclude_patterns and include_file:
-            # Exclude if file matches any exclude pattern
-            exclude_file = any(fnmatch.fnmatch(file_path, pattern) for pattern in exclude_patterns)
-            return not exclude_file
-
-        return include_file
+    # Use the optimized file filtering utility instead of a local function
+    def check_file(file_path: str) -> bool:
+        """Determine if a file should be included based on patterns using the optimized utility"""
+        return should_process_file(file_path, include_patterns, exclude_patterns)
 
     # Detect SSH URL (git@ or .git suffix)
     is_ssh_url = repo_url.startswith("git@") or repo_url.endswith(".git")
@@ -100,8 +89,8 @@ def crawl_github_files(
                         skipped_files.append((rel_path, file_size))
                         continue
 
-                    # Check include/exclude patterns
-                    if not should_include_file(rel_path, filename):
+                    # Check include/exclude patterns using optimized function
+                    if not check_file(rel_path):
                         continue
 
                     all_files.append((abs_path, rel_path, file_size))
@@ -282,8 +271,8 @@ def crawl_github_files(
                 rel_path = item_path
             
             if item["type"] == "file":
-                # Check if file should be included based on patterns
-                if not should_include_file(rel_path, item["name"]):
+                # Check if file should be included based on patterns using optimized function
+                if not check_file(rel_path):
                     continue
                 
                 # Check file size if available

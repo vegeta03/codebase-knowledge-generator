@@ -3,6 +3,7 @@ import fnmatch
 import pathspec
 import joblib
 from tqdm import tqdm
+from utils.file_filtering import should_process_file
 
 
 def crawl_local_files(
@@ -74,29 +75,13 @@ def crawl_local_files(
         """Process a single file and return (path, content) if valid, None otherwise"""
         relpath = os.path.relpath(filepath, directory) if use_relative_paths else filepath
 
-        # --- Exclusion check ---
-        excluded = False
+        # --- Exclusion check using gitignore first (highest priority) ---
         if gitignore_spec and gitignore_spec.match_file(relpath):
-            excluded = True
-
-        if not excluded and exclude_patterns:
-            for pattern in exclude_patterns:
-                if fnmatch.fnmatch(relpath, pattern):
-                    excluded = True
-                    break
-
-        included = False
-        if include_patterns:
-            for pattern in include_patterns:
-                if fnmatch.fnmatch(relpath, pattern):
-                    included = True
-                    break
-        else:
-            included = True
-
-        status = "processed"
-        if not included or excluded:
-            return None  # Skip to next file if not included or excluded
+            return None
+            
+        # --- Use optimized file filtering utility for pattern matching ---
+        if not should_process_file(relpath, include_patterns, exclude_patterns):
+            return None  # Skip to next file if not passing pattern matching
 
         if max_file_size and os.path.getsize(filepath) > max_file_size:
             return None  # Skip large files
