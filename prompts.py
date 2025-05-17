@@ -35,14 +35,22 @@ Codebase Context:
 {context}
 
 {language_instruction}Analyze the codebase context.
-Identify the complete and comprehensive core most important abstractions to help those new to the codebase.
+Identify ALL distinct functional abstractions in this codebase to help those new to the codebase. Being exhaustive is critical - missing abstractions is worse than including minor ones.
+
+NOTE: You are seeing only a portion of the codebase in this chunk. Identify ANY abstraction you can recognize, even if it seems incomplete. The goal is to capture ALL possible abstractions at multiple levels of granularity - from high-level architectural patterns down to significant utility functions, classes, or modules.
 
 For each abstraction, provide:
 1. A concise `name`{name_lang_hint}.
-2. A "technical" and "computer science" centric `description` explaining what it is with a real-world and practical analogy, in atleast 100 words or more if required{desc_lang_hint}.
+2. A "highly-technical" and "computer science" centric `description` explaining what it is with a real-world and practical analogy, in at least 300 words{desc_lang_hint}. Include all aspects of the abstraction, including edge cases and advanced usage patterns.
 3. A list of relevant `file_indices` (integers) using the format `idx # path/comment`.
 
-CRITICAL INSTRUCTION: Your primary task is to identify maximum number of core functional abstractions of the application. You MUST NOT identify any form of software testing (including but not limited to unit tests, integration tests, end-to-end (E2E) tests, performance tests, etc.), testing frameworks, test runners, test utilities, or any code, files, or concepts primarily related to testing as an abstraction. If you encounter testing-related elements, ignore them for the purpose of abstraction identification. Focus exclusively on the application's runtime behavior, business logic, and core architectural components.
+IMPORTANT GUIDANCE:
+- Identify abstractions at ALL levels of granularity - architectural patterns, design patterns, services, components, significant classes, utility functions, etc.
+- For any framework or technology stack, identify both technology-specific abstractions (e.g., services, components) and application-specific implementations
+- Common abstraction categories to consider: Data models, Services/APIs, UI components, State management, Configuration, Utilities, Core logic, Domain entities, Controllers, Routing mechanisms, Authentication/Security, Event handling, etc.
+- Do not limit yourself to a specific number of abstractions - identify ALL that you can find
+
+CRITICAL INSTRUCTION: Your primary task is to identify MAXIMUM number of core abstractions of the application. You MUST NOT identify any form of software testing (including but not limited to unit tests, integration tests, end-to-end (E2E) tests, performance tests, etc.), testing frameworks, test runners, test utilities, or any code, files, or concepts primarily related to testing as an abstraction. If you encounter testing-related elements, ignore them for the purpose of abstraction identification. Focus exclusively on the application's runtime behavior, business logic, and core architectural components.
 
 List of file indices and paths present in the context:
 {file_listing_for_prompt}
@@ -53,7 +61,7 @@ Format the output as a JSON5 list of dictionaries:
 [
   {{
     "name": "Query Processing{name_lang_hint}",
-    "description": "Explains what the abstraction does.\nIt's like a central dispatcher routing requests.{desc_lang_hint}",
+    "description": "Explains what the abstraction does in detail, covering all aspects and edge cases. Include implementation details, usage patterns, and relationships with other abstractions. It's like a central dispatcher routing requests. Consider providing details about initialization, configuration, error handling, and performance aspects. Explain how it fits into the overall architecture.{desc_lang_hint}",
     "file_indices": [
       "0 # path/to/file1.py",
       "3 # path/to/related.py"
@@ -61,12 +69,12 @@ Format the output as a JSON5 list of dictionaries:
   }},
   {{
     "name": "Query Optimization{name_lang_hint}",
-    "description": "Another core concept, similar to a blueprint for objects.{desc_lang_hint}",
+    "description": "Another core concept, similar to a blueprint for objects. Provide comprehensive details about its purpose, internal mechanisms, configuration options, and how other components interact with it.{desc_lang_hint}",
     "file_indices": [
       "5 # path/to/another.js"
     ]
   }}
-  // ... include all complete and comprehensive core most important abstractions
+  // ... include ALL distinct functional abstractions
 ]
 ```"""
 
@@ -106,12 +114,12 @@ Context (Abstractions, Descriptions, Code):
 
 {language_instruction}Please provide:
 1. A high-level `summary` of the project's main purpose and functionality in a short "technical" and "computer science" friendly sentences{lang_hint}. Use markdown formatting with **bold** and *italic* text to highlight important concepts.
-2. A list (`relationships`) describing the key interactions between these abstractions. For each relationship, specify:
+2. A comprehensive list (`relationships`) describing ALL significant interactions between these abstractions. For each relationship, specify:
     - `from_abstraction`: Index of the source abstraction (e.g., `0 # AbstractionName1`)
     - `to_abstraction`: Index of the target abstraction (e.g., `1 # AbstractionName2`)
     - `label`: A brief label for the interaction **in just a few words**{lang_hint} (e.g., "Manages", "Inherits", "Uses").
     Ideally the relationship should be backed by one abstraction calling or passing parameters to another.
-    Make the relationship Simple but don't dilute it while doing so and exclude those non-important ones.
+    Be thorough in identifying ALL relationships, ensuring complete coverage of how abstractions interact.
 
 IMPORTANT INSTRUCTIONS:
 1. Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target).
@@ -120,6 +128,7 @@ IMPORTANT INSTRUCTIONS:
 4. Do NOT use file indices or project names in the relationships.
 5. The indices in from_abstraction and to_abstraction must be between 0 and {num_abstractions-1} inclusive.
 6. Exclude any relationships that are solely testing-related. Do not focus on test frameworks, testing utilities, or test implementations when analyzing relationships.
+7. Be COMPREHENSIVE - identify ALL meaningful relationships, not just the most obvious ones.
 
 Format the output as JSON5:
 
@@ -137,7 +146,7 @@ Format the output as JSON5:
       "to_abstraction": "0 # AbstractionName1",
       "label": "Provides config{lang_hint}"
     }}
-    // ... other relationships
+    // ... include ALL relationships between abstractions
   ]
 }}
 ```
@@ -173,8 +182,15 @@ Abstractions (Index # Name){list_lang_note}:
 Context about relationships and project summary:
 {context}
 
-If you are going to make a tutorial for ```` {project_name} ````, what is the best order to explain these abstractions, from first to last?
-Ideally, first explain those that are the most important or foundational, perhaps user-facing concepts or entry points. Then move to more detailed, lower-level implementation details or supporting concepts.
+If you are going to make a comprehensive tutorial for ```` {project_name} ````, what is the best order to explain these abstractions, from first to last?
+Ideally, first explain those that are the most important or foundational, perhaps user-facing concepts or entry points. Then move to more detailed, lower-level implementation details or supporting concepts. Inspired by the "Tabulation" approach from Dynamic Programming.
+
+Create a logical progression that maximizes learning effectiveness:
+1. Start with core concepts that provide an architectural overview
+2. Move to foundational abstractions that many other parts depend on
+3. Cover major subsystems and their components
+4. Address specialized or advanced abstractions that build on earlier concepts
+5. Ensure that no abstraction is presented before the abstractions it depends on
 
 IMPORTANT: Do not prioritize testing frameworks, test utilities, or any testing-related abstractions in your ordering. Focus on explaining the core functionality of the application rather than how to test it.
 
@@ -185,7 +201,7 @@ Output the ordered list of abstraction indices, including the name in a comment 
   "2 # FoundationalConcept",
   "0 # CoreClassA",
   "1 # CoreClassB (uses CoreClassA)",
-  // ...
+  // ... include ALL abstractions in the optimal learning order
 ]
 ```
 
@@ -238,7 +254,7 @@ def get_write_chapter_prompt(
         Formatted prompt string
     """
     return f"""
-{language_instruction}Write a software developer friendly tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
+{language_instruction}Write a comprehensive, in-depth tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
 
 Concept Details{concept_details_note}:
 - Name: {abstraction_name}
@@ -255,6 +271,9 @@ Relevant Code Snippets (Code itself remains unchanged):
 {file_context_str if file_context_str else "No specific code snippets provided for this abstraction."}
 
 Instructions for the chapter (Generate content in {language.capitalize()} unless specified otherwise):
+- Be STRICTLY LOSSLESS and COMPREHENSIVE - capture ALL aspects of this abstraction from the provided context/data.
+- The chapter should be thorough and detailed, covering the abstraction from basic concepts to advanced usage patterns.
+
 - Start with a clear heading (e.g., `# Chapter {chapter_num}: {abstraction_name}`). Use the provided concept name.
 
 - If this is not the first chapter, begin with a brief transition from the previous chapter{instruction_lang_note}, referencing it with a proper Markdown link using its name{link_lang_note}.
@@ -265,13 +284,23 @@ Instructions for the chapter (Generate content in {language.capitalize()} unless
 
 - Explain how to use this abstraction to solve the use case{instruction_lang_note}. Give example inputs and outputs for code snippets (if the output isn't values, describe at a high level what will happen{instruction_lang_note}).
 
+- Include ALL relevant code examples for this abstraction from the codebase. If multiple implementations exist, compare and contrast them to provide complete coverage.
+
 - Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}.
 
 - Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - keep it minimal with at least 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n```{mermaid_lang_note}.
 
 - Then dive deeper into code for the internal implementation with references to files. Provide example code blocks, but make them similarly simple however don't dilute it, and "Computer Science"-friendly. Explain{instruction_lang_note}.
 
-- IMPORTANT: When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
+- IMPORTANT: Explicitly discuss how this abstraction interacts with EVERY other related abstraction. When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
+
+- Cover ALL aspects of the abstraction, including edge cases and advanced usage patterns. Include sections on:
+  * Core functionality and purpose
+  * Initialization and configuration
+  * Error handling and edge cases
+  * Performance considerations
+  * Integration with other abstractions
+  * Any architectural patterns it implements
 
 - Use mermaid diagrams to illustrate complex concepts with PROPER mermaid syntax. ALWAYS begin with the diagram type (e.g., `sequenceDiagram`, `flowchart LR`, `classDiagram`, etc.) and use the correct syntax for that diagram type. For sequence diagrams, use proper arrow syntax like `->>`, `-->>`, `-->`, etc. NOT just `->`. For flowcharts, use proper node and connection syntax. Example with correct syntax: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n``` {mermaid_lang_note}.
 

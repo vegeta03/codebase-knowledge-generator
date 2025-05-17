@@ -7,6 +7,7 @@ from utils.call_llm import call_llm
 from utils.crawl_local_files import crawl_local_files
 from utils.code_chunking import chunk_codebase
 from utils.chunk_processor import process_code_for_llm, batch_process_chunks, estimate_model_calls
+from prompts import get_identify_abstractions_prompt
 
 # Helper to get content for specific file indices
 def get_content_for_indices(files_data, indices):
@@ -245,8 +246,15 @@ class IdentifyAbstractions(Node):
             name_lang_hint = f" (value in {language.capitalize()})"
             desc_lang_hint = f" (value in {language.capitalize()})"
         
-        # The prompt template with {code} placeholder for the AST-aware chunked code
-        prompt_template = f"""You are a senior software engineer tasked with identifying the key abstractions in the '{project_name}' codebase to create a comprehensive tutorial. Focus on identifying core abstractions that represent the fundamental concepts and patterns in this codebase.\n\n{language_instruction}Analyze the following code files:\n\n{file_listing_for_prompt}\n\nCode content:\n\n{{code}}\n\nIdentify the 5-8 most important abstractions in this codebase. Important abstractions are critical concepts that help in understanding the codebase.\n\nFor each abstraction, include:\n- 'name'{name_lang_hint}: A concise, memorable title for the abstraction (2-5 words)\n- 'description'{desc_lang_hint}: A clear, concise explanation of what this abstraction is (1-2 sentences)\n- 'file_indices': List of file indices (from the file list above) where this abstraction is implemented or heavily used\n\nExample response format:\n```json\n[\n  {{\n    "name": "Data Processor",\n    "description": "Core component that transforms raw input data into structured information for analysis.",\n    "file_indices": [0, 3, 5]\n  }},\n  {{\n    "name": "Config Manager",\n    "description": "Handles application configuration across different environments.",\n    "file_indices": [1, 2]\n  }}\n]\n```\n\nInclude ONLY JSON in your response, with no additional text before or after."""
+        # Get the prompt template from prompts.py with {code} placeholder for AST-aware chunked code
+        prompt_template = get_identify_abstractions_prompt(
+            project_name=project_name,
+            context="{code}",  # Placeholder for code content that will be replaced
+            file_listing_for_prompt=file_listing_for_prompt,
+            language_instruction=language_instruction,
+            name_lang_hint=name_lang_hint,
+            desc_lang_hint=desc_lang_hint
+        )
         
         return prompt_template
 
@@ -310,24 +318,64 @@ class IdentifyAbstractions(Node):
                             print(f"Warning: Skipping incomplete abstraction: {abstraction}")
                             continue
                             
-                        # Normalize the abstraction name for deduplication
-                        norm_name = abstraction["name"].lower().strip()
+                        # Create a more nuanced abstraction identifier that considers both name and file indices
+                        # This helps preserve abstractions with similar names but different scope/purpose
+                        abstraction_name = abstraction["name"].strip()
+                        file_indices_set = set([str(idx) for idx in abstraction["file_indices"]])
                         
+                        # Use first 50 chars of description to help distinguish similar abstractions
+                        desc_excerpt = abstraction["description"][:50] if abstraction["description"] else ""
+                        
+                        # Create a composite key that's still name-focused but considers context
+                        norm_name = abstraction_name.lower()
+                        
+                        # Check if we have an exact name match
                         if norm_name in abstraction_tracker:
-                            # Update existing abstraction
                             existing = abstraction_tracker[norm_name]
-                            # Log duplication found
-                            print(f"  Duplicate found: \"{abstraction['name']}\" merging with existing abstraction")
+                            existing_file_set = set([str(idx) for idx in existing["file_indices"]])
                             
-                            # Merge file indices (avoid duplicates)
-                            old_indices = set(existing["file_indices"])
-                            new_indices = set(abstraction["file_indices"])
-                            combined_indices = old_indices.union(new_indices)
+                            # Calculate overlap between file indices
+                            file_overlap_ratio = 0
+                            if existing_file_set and file_indices_set:
+                                intersection = existing_file_set.intersection(file_indices_set)
+                                union = existing_file_set.union(file_indices_set)
+                                file_overlap_ratio = len(intersection) / len(union)
                             
-                            if len(combined_indices) > len(old_indices):
-                                print(f"    Added {len(combined_indices) - len(old_indices)} new file indices")
-                            
-                            existing["file_indices"] = list(combined_indices)
+                            # If high overlap in files and similar name, treat as duplicate
+                            # Otherwise, treat as distinct abstraction with similar name
+                            if file_overlap_ratio > 0.3:  # Require at least 30% overlap to merge
+                                # Merge this as a duplicate
+                                print(f"  Duplicate found: \"{abstraction['name']}\" merging with existing abstraction (file overlap: {file_overlap_ratio:.2f})")
+                                
+                                # Merge file indices (avoid duplicates)
+                                old_indices = set(existing["file_indices"])
+                                new_indices = set(abstraction["file_indices"])
+                                combined_indices = old_indices.union(new_indices)
+                                
+                                if len(combined_indices) > len(old_indices):
+                                    print(f"    Added {len(combined_indices) - len(old_indices)} new file indices")
+                                
+                                existing["file_indices"] = list(combined_indices)
+                                
+                                # Take the longer description
+                                if len(abstraction["description"]) > len(existing["description"]):
+                                    existing["description"] = abstraction["description"]
+                                    print(f"    Updated with longer description")
+                            else:
+                                # Different enough to be a distinct abstraction 
+                                # Add a suffix to make the name unique
+                                variant_count = 1
+                                variant_name = f"{abstraction_name} (Variant {variant_count})"
+                                variant_norm = variant_name.lower()
+                                
+                                while variant_norm in abstraction_tracker:
+                                    variant_count += 1
+                                    variant_name = f"{abstraction_name} (Variant {variant_count})"
+                                    variant_norm = variant_name.lower()
+                                
+                                abstraction["name"] = variant_name
+                                print(f"  Similar but distinct abstraction: \"{abstraction['name']}\" (file overlap: {file_overlap_ratio:.2f})")
+                                abstraction_tracker[variant_norm] = abstraction
                         else:
                             # Add new abstraction to tracker
                             print(f"  New abstraction: \"{abstraction['name']}\"")
@@ -348,6 +396,40 @@ class IdentifyAbstractions(Node):
             print(f"Total raw abstractions across all chunks: {total_raw_abstractions}")
             print(f"Unique abstractions after deduplication: {len(combined_abstractions)}")
             print(f"Removed duplicates: {total_raw_abstractions - len(combined_abstractions)}")
+            
+            # Check if we found a reasonable number of abstractions
+            # Threshold varies by codebase size but larger codebases should have more abstractions
+            file_count_threshold = {
+                10: 5,     # For tiny codebases (<10 files), expect at least 5 abstractions
+                30: 10,    # For small codebases (<30 files), expect at least 10 abstractions 
+                100: 15,   # For medium codebases (<100 files), expect at least 15 abstractions
+                1000: 20,  # For large codebases (<1000 files), expect at least 20 abstractions
+                10000: 30  # For very large codebases, expect at least 30 abstractions
+            }
+            
+            # Find the appropriate threshold for this codebase size
+            expected_abstractions = 5  # Default minimum
+            for size, threshold in sorted(file_count_threshold.items()):
+                if file_count <= size:
+                    expected_abstractions = threshold
+                    break
+                expected_abstractions = threshold  # Use the highest threshold for very large codebases
+            
+            if len(combined_abstractions) < expected_abstractions:
+                print("\n⚠️ WARNING: Found fewer abstractions than expected!")
+                print(f"For a codebase with {file_count} files, expected at least {expected_abstractions} abstractions")
+                print(f"But only found {len(combined_abstractions)} abstractions")
+                print("Possible solutions to consider:")
+                print("1. Review and refine the abstraction identification prompt")
+                print("2. Adjust chunk size or chunking strategy to better capture cross-cutting concerns")
+                print("3. Modify deduplication logic to preserve more distinct abstractions")
+                print("4. Consider a multi-pass approach for hierarchical abstraction identification")
+            elif len(combined_abstractions) >= expected_abstractions * 2:
+                print("\n✅ Excellent! Found a comprehensive set of abstractions")
+                print(f"Expected at least {expected_abstractions}, found {len(combined_abstractions)}")
+            else:
+                print("\n✓ Found an adequate number of abstractions")
+                print(f"Expected at least {expected_abstractions}, found {len(combined_abstractions)}")
             
             # List all chunks with their abstraction counts
             print("\nAbstractions per chunk:")
