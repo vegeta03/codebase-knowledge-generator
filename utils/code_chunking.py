@@ -23,24 +23,6 @@ import re
 # Set up logging
 logger = logging.getLogger("code_chunker")
 
-# Default model context length if not specified in environment
-DEFAULT_MODEL_CONTEXT_LENGTH = 8192
-
-# Get model context length from environment
-def get_model_context_length():
-    """Get the current model context length from environment or use default"""
-    return int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
-
-# Reserve 20% of context for model response
-def get_max_input_tokens():
-    """Calculate max input tokens based on current model context length"""
-    return int(get_model_context_length() * 0.8)
-
-# For backward compatibility - these values will be used by other modules
-# but we'll override the MODEL_CONTEXT_LENGTH and MAX_INPUT_TOKENS at runtime
-MODEL_CONTEXT_LENGTH = get_model_context_length()
-MAX_INPUT_TOKENS = get_max_input_tokens()
-
 # Language mapping from file extensions to tree-sitter language names
 LANGUAGE_MAPPING = {
     # Python
@@ -91,6 +73,24 @@ LANGUAGE_MAPPING = {
     ".swift": "swift",
     ".kt": "kotlin",
 }
+
+# Default model context length if not specified in environment
+DEFAULT_MODEL_CONTEXT_LENGTH = 8192
+
+# Get model context length from environment
+def get_model_context_length():
+    """Get the current model context length from environment or use default"""
+    return int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
+
+# Reserve 20% of context for model response
+def get_max_input_tokens():
+    """Calculate max input tokens based on current model context length"""
+    return int(get_model_context_length() * 0.8)
+
+# For backward compatibility - these values will be used by other modules
+# but we'll override the MODEL_CONTEXT_LENGTH and MAX_INPUT_TOKENS at runtime
+MODEL_CONTEXT_LENGTH = get_model_context_length()
+MAX_INPUT_TOKENS = get_max_input_tokens()
 
 # Try to import tree-sitter and set up available languages
 try:

@@ -12,6 +12,8 @@ import os
 import logging
 from typing import List, Dict, Any, Optional, Union, Tuple
 import re
+import json5
+from tqdm.asyncio import tqdm_asyncio
 
 # Set up logging
 logger = logging.getLogger("chunk_processor")

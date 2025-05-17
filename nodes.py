@@ -152,6 +152,87 @@ class IdentifyAbstractions(Node):
             use_cache,
         )  # Return all parameters
     
+    def _clean_llm_response(self, response: str) -> str:
+        """
+        Clean LLM response by removing <think></think> tags and other artifacts.
+        
+        Args:
+            response: The raw LLM response to clean
+            
+        Returns:
+            Cleaned response with thinking tags removed
+        """
+        # Remove <think>...</think> blocks
+        import re
+        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        
+        # Remove possible trailing/leading whitespace from the cleaning
+        clean_response = clean_response.strip()
+        
+        # If the response is now empty (entire response was inside think tags), 
+        # return the original (this shouldn't happen with proper LLM behavior)
+        if not clean_response and response:
+            print("Warning: Entire response was inside <think> tags. Using original response.")
+            return response
+            
+        return clean_response
+    
+    def _extract_json_from_response(self, response: str) -> str:
+        """
+        Extract JSON content from an LLM response.
+        
+        Args:
+            response: The LLM response, potentially containing JSON code blocks
+            
+        Returns:
+            The extracted JSON as a string
+        """
+        import re
+        
+        # First, clean any thinking tags from the response
+        response = self._clean_llm_response(response)
+        
+        # Look for JSON/JSON5 in code blocks (improved pattern matching)
+        json_match = re.search(r'```(?:json5?|jsonc?)\s*(.+?)\s*```', response, flags=re.DOTALL)
+        if json_match:
+            # Found JSON in a code block
+            return json_match.group(1).strip()
+            
+        # If no code block, look for JSON arrays starting with [ and ending with ]
+        # This more specific pattern helps with arrays of objects
+        array_match = re.search(r'(\[\s*\{\s*"name":.+?\}\s*(?:,\s*\{\s*"name":.+?\}\s*)*\])', response, flags=re.DOTALL)
+        if array_match:
+            return array_match.group(1).strip()
+            
+        # If no specific array pattern matches, try a more general array pattern
+        general_array_match = re.search(r'(\[\s*(?:{.+?})\s*(?:,\s*(?:{.+?})\s*)*\])', response, flags=re.DOTALL)
+        if general_array_match:
+            return general_array_match.group(1).strip()
+        
+        # If still no match, try to find a JSON object with curly braces
+        json_obj_match = re.search(r'({[\s\S]*})', response, flags=re.DOTALL)
+        if json_obj_match:
+            return json_obj_match.group(1).strip()
+                
+        # If still nothing found, assume the entire (cleaned) response is JSON
+        # But first check if it starts with [ and ends with ] to avoid partial matches
+        if response.strip().startswith('[') and response.strip().endswith(']'):
+            return response.strip()
+            
+        # Last resort: handle edge cases where the JSON might be malformed
+        # Try to extract just the array part if the response contains an array
+        if '[' in response and ']' in response:
+            try:
+                start_idx = response.find('[')
+                end_idx = response.rfind(']') + 1
+                if start_idx < end_idx:
+                    return response[start_idx:end_idx].strip()
+            except:
+                pass
+                
+        # If all extraction attempts failed, return the original response
+        return response.strip()
+
     def _create_prompt_template(self, project_name, language, file_listing_for_prompt):
         """Create a prompt template for identifying abstractions."""
         # Add language instruction and hints only if not English
@@ -208,14 +289,8 @@ class IdentifyAbstractions(Node):
                 
                 # Parse the JSON response
                 try:
-                    # Try to extract JSON from the response (it might have markdown code blocks)
-                    json_match = re.search(r'```json\s*(.+?)\s*```', result, re.DOTALL)
-                    if json_match:
-                        # Found JSON in a code block
-                        abstractions_json = json_match.group(1).strip()
-                    else:
-                        # Assume the entire response is JSON
-                        abstractions_json = result.strip()
+                    # Extract JSON from the response using our helper function
+                    abstractions_json = self._extract_json_from_response(result)
                         
                     # Parse the JSON
                     chunk_abstractions = json5.loads(abstractions_json)
@@ -458,6 +533,87 @@ class AnalyzeRelationships(Node):
             use_cache,
         )  # Return use_cache
 
+    def _clean_llm_response(self, response: str) -> str:
+        """
+        Clean LLM response by removing <think></think> tags and other artifacts.
+        
+        Args:
+            response: The raw LLM response to clean
+            
+        Returns:
+            Cleaned response with thinking tags removed
+        """
+        # Remove <think>...</think> blocks
+        import re
+        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        
+        # Remove possible trailing/leading whitespace from the cleaning
+        clean_response = clean_response.strip()
+        
+        # If the response is now empty (entire response was inside think tags), 
+        # return the original (this shouldn't happen with proper LLM behavior)
+        if not clean_response and response:
+            print("Warning: Entire response was inside <think> tags. Using original response.")
+            return response
+            
+        return clean_response
+    
+    def _extract_json_from_response(self, response: str) -> str:
+        """
+        Extract JSON content from an LLM response.
+        
+        Args:
+            response: The LLM response, potentially containing JSON code blocks
+            
+        Returns:
+            The extracted JSON as a string
+        """
+        import re
+        
+        # First, clean any thinking tags from the response
+        response = self._clean_llm_response(response)
+        
+        # Look for JSON/JSON5 in code blocks (improved pattern matching)
+        json_match = re.search(r'```(?:json5?|jsonc?)\s*(.+?)\s*```', response, flags=re.DOTALL)
+        if json_match:
+            # Found JSON in a code block
+            return json_match.group(1).strip()
+            
+        # If no code block, look for JSON arrays starting with [ and ending with ]
+        # This more specific pattern helps with arrays of objects
+        array_match = re.search(r'(\[\s*\{\s*"name":.+?\}\s*(?:,\s*\{\s*"name":.+?\}\s*)*\])', response, flags=re.DOTALL)
+        if array_match:
+            return array_match.group(1).strip()
+            
+        # If no specific array pattern matches, try a more general array pattern
+        general_array_match = re.search(r'(\[\s*(?:{.+?})\s*(?:,\s*(?:{.+?})\s*)*\])', response, flags=re.DOTALL)
+        if general_array_match:
+            return general_array_match.group(1).strip()
+        
+        # If still no match, try to find a JSON object with curly braces
+        json_obj_match = re.search(r'({[\s\S]*})', response, flags=re.DOTALL)
+        if json_obj_match:
+            return json_obj_match.group(1).strip()
+                
+        # If still nothing found, assume the entire (cleaned) response is JSON
+        # But first check if it starts with [ and ends with ] to avoid partial matches
+        if response.strip().startswith('[') and response.strip().endswith(']'):
+            return response.strip()
+            
+        # Last resort: handle edge cases where the JSON might be malformed
+        # Try to extract just the array part if the response contains an array
+        if '[' in response and ']' in response:
+            try:
+                start_idx = response.find('[')
+                end_idx = response.rfind(']') + 1
+                if start_idx < end_idx:
+                    return response[start_idx:end_idx].strip()
+            except:
+                pass
+                
+        # If all extraction attempts failed, return the original response
+        return response.strip()
+
     def exec(self, prep_res):
         (
             context,
@@ -552,7 +708,8 @@ Now, provide the JSON5 output:
 
         # --- Validation ---
         try:
-            json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
+            # Extract and clean JSON5 from response
+            json5_str = self._extract_json_from_response(response)
             relationships_data = json5.loads(json5_str)
         except (IndexError, ValueError) as e:
             # Handle malformed JSON5 or missing code blocks
@@ -560,12 +717,7 @@ Now, provide the JSON5 output:
             print("Attempting to fix malformed JSON5...")
 
             # Try to extract JSON5 content even if not properly formatted
-            if "```json5" in response:
-                json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-            elif "```" in response:
-                json5_str = response.strip().split("```")[1].split("```")[0].strip()
-            else:
-                json5_str = response.strip()
+            json5_str = self._extract_json_from_response(response)
 
             # Try to fix common JSON5 formatting issues
             # Fix 1: Multiple strings in summary field
@@ -746,7 +898,6 @@ Now, provide the JSON5 output:
             "details": validated_relationships,  # Store validated, index-based relationships with potentially translated labels
         }
 
-
     def post(self, shared, prep_res, exec_res):
         # Structure is now {"summary": str, "details": [{"from": int, "to": int, "label": str}]}
         # Summary and label might be translated
@@ -809,6 +960,87 @@ class OrderChapters(Node):
             use_cache,
         )  # Return use_cache
 
+    def _clean_llm_response(self, response: str) -> str:
+        """
+        Clean LLM response by removing <think></think> tags and other artifacts.
+        
+        Args:
+            response: The raw LLM response to clean
+            
+        Returns:
+            Cleaned response with thinking tags removed
+        """
+        # Remove <think>...</think> blocks
+        import re
+        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        
+        # Remove possible trailing/leading whitespace from the cleaning
+        clean_response = clean_response.strip()
+        
+        # If the response is now empty (entire response was inside think tags), 
+        # return the original (this shouldn't happen with proper LLM behavior)
+        if not clean_response and response:
+            print("Warning: Entire response was inside <think> tags. Using original response.")
+            return response
+            
+        return clean_response
+    
+    def _extract_json_from_response(self, response: str) -> str:
+        """
+        Extract JSON content from an LLM response.
+        
+        Args:
+            response: The LLM response, potentially containing JSON code blocks
+            
+        Returns:
+            The extracted JSON as a string
+        """
+        import re
+        
+        # First, clean any thinking tags from the response
+        response = self._clean_llm_response(response)
+        
+        # Look for JSON/JSON5 in code blocks (improved pattern matching)
+        json_match = re.search(r'```(?:json5?|jsonc?)\s*(.+?)\s*```', response, flags=re.DOTALL)
+        if json_match:
+            # Found JSON in a code block
+            return json_match.group(1).strip()
+            
+        # If no code block, look for JSON arrays starting with [ and ending with ]
+        # This more specific pattern helps with arrays of objects
+        array_match = re.search(r'(\[\s*\{\s*"name":.+?\}\s*(?:,\s*\{\s*"name":.+?\}\s*)*\])', response, flags=re.DOTALL)
+        if array_match:
+            return array_match.group(1).strip()
+            
+        # If no specific array pattern matches, try a more general array pattern
+        general_array_match = re.search(r'(\[\s*(?:{.+?})\s*(?:,\s*(?:{.+?})\s*)*\])', response, flags=re.DOTALL)
+        if general_array_match:
+            return general_array_match.group(1).strip()
+        
+        # If still no match, try to find a JSON object with curly braces
+        json_obj_match = re.search(r'({[\s\S]*})', response, flags=re.DOTALL)
+        if json_obj_match:
+            return json_obj_match.group(1).strip()
+                
+        # If still nothing found, assume the entire (cleaned) response is JSON
+        # But first check if it starts with [ and ends with ] to avoid partial matches
+        if response.strip().startswith('[') and response.strip().endswith(']'):
+            return response.strip()
+            
+        # Last resort: handle edge cases where the JSON might be malformed
+        # Try to extract just the array part if the response contains an array
+        if '[' in response and ']' in response:
+            try:
+                start_idx = response.find('[')
+                end_idx = response.rfind(']') + 1
+                if start_idx < end_idx:
+                    return response[start_idx:end_idx].strip()
+            except:
+                pass
+                
+        # If all extraction attempts failed, return the original response
+        return response.strip()
+
     def exec(self, prep_res):
         (
             abstraction_listing,
@@ -850,16 +1082,8 @@ Now, provide the JSON5 output:
 
         # --- Validation ---
         try:
-            json5_str = response.strip().split("```json5")[1].split("```")[0].strip()
-        except IndexError:
-            # Handle case where ```json5 is not found
-            print("Could not find ```json5 in response, trying to extract JSON from any code block")
-            if "```" in response:
-                json5_str = response.strip().split("```")[1].split("```")[0].strip()
-            else:
-                json5_str = response.strip()
-
-        try:
+            # Extract JSON from the response using our helper function
+            json5_str = self._extract_json_from_response(response)
             ordered_indices_raw = json5.loads(json5_str)
         except ValueError as e:
             print(f"Error parsing JSON5 from LLM response: {e}")
@@ -1047,6 +1271,31 @@ class WriteChapters(BatchNode):
         print(f"Preparing to write {len(items_to_process)} chapters...")
         return items_to_process  # Iterable for BatchNode
 
+    def _clean_llm_response(self, response: str) -> str:
+        """
+        Clean LLM response by removing <think></think> tags and other artifacts.
+        
+        Args:
+            response: The raw LLM response to clean
+            
+        Returns:
+            Cleaned response with thinking tags removed
+        """
+        # Remove <think>...</think> blocks
+        import re
+        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        
+        # Remove possible trailing/leading whitespace from the cleaning
+        clean_response = clean_response.strip()
+        
+        # If the response is now empty (entire response was inside think tags), 
+        # return the original (this shouldn't happen with proper LLM behavior)
+        if not clean_response and response:
+            print("Warning: Entire response was inside <think> tags. Using original response.")
+            return response
+            
+        return clean_response
+
     def exec(self, item):
         # This runs for each item prepared above
         abstraction_name = item["abstraction_details"][
@@ -1145,6 +1394,10 @@ Instructions for the chapter (Generate content in {language.capitalize()} unless
 Now, directly provide a "technical" and "Computer Science"-friendly Markdown output (DON'T need ```markdown``` tags):
 """
         chapter_content = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
+
+        # Clean the chapter content to remove <think></think> blocks
+        chapter_content = self._clean_llm_response(chapter_content)
+        
         # Basic validation/cleanup
         actual_heading = f"# Chapter {chapter_num}: {abstraction_name}"  # Use potentially translated name
         if not chapter_content.strip().startswith(f"# Chapter {chapter_num}"):
@@ -1251,6 +1504,9 @@ class CombineTutorial(Node):
 
                 # Add attribution to chapter content (using English fixed string)
                 chapter_content = chapters_content[i]  # Potentially translated content
+                # Clean any thinking tags from chapter content
+                chapter_content = self._clean_llm_response(chapter_content)
+                
                 if not chapter_content.endswith("\n\n"):
                     chapter_content += "\n\n"
                 # Keep fixed strings in English
@@ -1271,6 +1527,31 @@ class CombineTutorial(Node):
             "index_content": index_content,
             "chapter_files": chapter_files,  # List of {"filename": str, "content": str}
         }
+        
+    def _clean_llm_response(self, response: str) -> str:
+        """
+        Clean LLM response by removing <think></think> tags and other artifacts.
+        
+        Args:
+            response: The raw LLM response to clean
+            
+        Returns:
+            Cleaned response with thinking tags removed
+        """
+        # Remove <think>...</think> blocks
+        import re
+        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        
+        # Remove possible trailing/leading whitespace from the cleaning
+        clean_response = clean_response.strip()
+        
+        # If the response is now empty (entire response was inside think tags), 
+        # return the original (this shouldn't happen with proper LLM behavior)
+        if not clean_response and response:
+            print("Warning: Entire response was inside <think> tags. Using original response.")
+            return response
+            
+        return clean_response
 
     def exec(self, prep_res):
         output_path = prep_res["output_path"]
@@ -1287,11 +1568,12 @@ class CombineTutorial(Node):
             f.write(index_content)
         print(f"  - Wrote {index_filepath}")
 
-        # Write chapter files
+        # Write chapter files - earlier implementation already had the cleaning code
         for chapter_info in chapter_files:
             chapter_content = chapter_info["content"]
             
-            # Remove <think></think> tags and their content from the chapter
+            # No need to manually clean again since we've already done this in prep
+            # The existing code to clean <think></think> tags can remain
             import re
             chapter_content = re.sub(r'<think>.*?</think>', '', chapter_content, flags=re.DOTALL)
             
@@ -1301,7 +1583,6 @@ class CombineTutorial(Node):
             print(f"  - Wrote {chapter_filepath}")
 
         return output_path # Return the final path
-
 
     def post(self, shared, prep_res, exec_res):
         shared["final_output_dir"] = exec_res # Store the output path
