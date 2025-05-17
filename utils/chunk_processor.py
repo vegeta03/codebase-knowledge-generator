@@ -53,9 +53,28 @@ def process_code_for_llm(base_dir: str,
     logger.info(f"Model context length: {current_model_context_length}")
     logger.info(f"Max input tokens (80%): {max_input_tokens}")
     logger.info(f"Effective max tokens for code: {effective_max_tokens}")
+    logger.info(f"Processing {len(file_paths)} files with total size: {sum(len(content) for content in file_contents.values())} characters")
     
     # Generate chunks using the hierarchical AST-aware chunking system
+    logger.info("Starting hierarchical AST-aware chunking process...")
     chunks = chunk_codebase(base_dir, file_paths, file_contents)
+    logger.info(f"Generated {len(chunks)} chunks using hierarchical AST-aware chunking")
+    
+    # Log chunk details
+    total_token_count = 0
+    total_files_covered = set()
+    for i, chunk in enumerate(chunks):
+        total_token_count += chunk["token_count"]
+        total_files_covered.update(chunk["files"])
+        logger.info(f"Chunk {i+1} (ID: {chunk['chunk_id']}) - {chunk['token_count']} tokens, " 
+                   f"covers {len(chunk['files'])} files, level: {chunk.get('level', 'unknown')}")
+                   
+    # Calculate overlap statistics
+    if len(chunks) > 0 and "overlap_percentage" in chunks[0]:
+        logger.info(f"Chunk overlap: {chunks[0]['overlap_percentage']}%")
+    
+    logger.info(f"Average tokens per chunk: {total_token_count / len(chunks) if chunks else 0:.2f}")
+    logger.info(f"Total files covered by all chunks: {len(total_files_covered)} of {len(file_paths)}")
     
     # Prepare the final prompts
     prepared_prompts = []
@@ -65,13 +84,24 @@ def process_code_for_llm(base_dir: str,
             # Create the prompt by substituting the code into the template
             prompt = prompt_template.replace("{code}", chunk["content"])
             
+            # Add estimated token information
+            total_tokens = chunk["token_count"] + prompt_token_estimate
+            chunk_utilization = (total_tokens / max_input_tokens) * 100
+            
             prepared_prompts.append({
                 "prompt": prompt,
                 "chunk_id": chunk["chunk_id"],
                 "files": chunk["files"],
-                "token_count": chunk["token_count"] + prompt_token_estimate,
+                "token_count": chunk["token_count"],
+                "estimated_tokens": total_tokens,
+                "token_utilization": f"{chunk_utilization:.2f}%",
+                "level": chunk.get("level", "unknown"),
+                "overlap_percentage": chunks[0].get("overlap_percentage", 0) if chunks else 0,
                 "estimated_response_tokens": int(current_model_context_length * 0.2)
             })
+            
+            logger.info(f"Prepared prompt for chunk {chunk['chunk_id']} with {total_tokens} tokens "
+                       f"({chunk_utilization:.2f}% of max input tokens)")
         else:
             # This should rarely happen with proper chunking, but log it if it does
             logger.warning(
@@ -79,6 +109,7 @@ def process_code_for_llm(base_dir: str,
                 f"({chunk['token_count']} > {effective_max_tokens}). Skipping."
             )
     
+    logger.info(f"Prepared {len(prepared_prompts)} prompts for LLM processing")
     return prepared_prompts
 
 
@@ -122,7 +153,8 @@ def estimate_model_calls(file_paths: List[str],
         "estimated_input_tokens": int(total_input_tokens),
         "estimated_response_tokens": int(total_response_tokens),
         "total_tokens": int(total_input_tokens + total_response_tokens),
-        "model_context_length": current_model_context_length
+        "model_context_length": current_model_context_length,
+        "max_input_tokens": max_input_tokens
     }
 
 
@@ -146,33 +178,67 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
     # For now, just process sequentially
     results = []
     
+    logger.info(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
+               f" (using cache: {use_cache})")
+    
+    # Track token usage
+    total_prompt_tokens = 0
+    successful_chunks = 0
+    failed_chunks = 0
+    
     for i, prompt_data in enumerate(prepared_prompts):
-        logger.info(f"Processing chunk {i+1}/{len(prepared_prompts)}: {prompt_data['chunk_id']}")
+        chunk_id = prompt_data["chunk_id"]
+        estimated_tokens = prompt_data.get("estimated_tokens", "unknown")
+        token_utilization = prompt_data.get("token_utilization", "unknown")
+        
+        logger.info(f"Processing chunk {i+1}/{len(prepared_prompts)}: ID {chunk_id}, " +
+                   f"estimated tokens: {estimated_tokens}, utilization: {token_utilization}")
+        
+        if isinstance(estimated_tokens, (int, float)):
+            total_prompt_tokens += estimated_tokens
         
         try:
             # Call the LLM with the prepared prompt
+            logger.info(f"Sending chunk {chunk_id} to LLM...")
             response = call_llm_func(prompt_data["prompt"], use_cache=use_cache)
+            
+            # Calculate approximate response length (rough estimate)
+            response_length = len(response)
+            estimated_response_tokens = response_length // 4  # rough estimate
             
             # Store the result
             results.append({
-                "chunk_id": prompt_data["chunk_id"],
+                "chunk_id": chunk_id,
                 "files": prompt_data["files"],
-                "prompt": prompt_data["prompt"],
+                "token_count": prompt_data.get("token_count", "unknown"),
+                "estimated_tokens": estimated_tokens,
+                "token_utilization": token_utilization,
+                "estimated_response_tokens": estimated_response_tokens,
                 "response": response
             })
             
-            logger.info(f"Successfully processed chunk {prompt_data['chunk_id']}")
+            logger.info(f"Successfully processed chunk {chunk_id}. " +
+                       f"Response length: ~{response_length} chars, " +
+                       f"~{estimated_response_tokens} tokens")
+            successful_chunks += 1
             
         except Exception as e:
-            logger.error(f"Error processing chunk {prompt_data['chunk_id']}: {e}")
+            logger.error(f"Error processing chunk {chunk_id}: {e}")
+            failed_chunks += 1
             
             # Add a failure entry
             results.append({
-                "chunk_id": prompt_data["chunk_id"],
+                "chunk_id": chunk_id,
                 "files": prompt_data["files"],
-                "prompt": prompt_data["prompt"],
+                "token_count": prompt_data.get("token_count", "unknown"),
+                "estimated_tokens": estimated_tokens,
+                "token_utilization": token_utilization,
                 "error": str(e)
             })
+    
+    # Log summary statistics
+    logger.info(f"Batch processing complete: {successful_chunks} successful, {failed_chunks} failed")
+    logger.info(f"Total estimated input tokens sent to LLM: {total_prompt_tokens}")
     
     return results
 

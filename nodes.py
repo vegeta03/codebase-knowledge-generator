@@ -112,14 +112,36 @@ class IdentifyAbstractions(Node):
         print(f"Estimated total tokens: {estimation['total_tokens']}")
         print(f"Using model context length: {estimation['model_context_length']} tokens")
         print(f"Reserving 20% ({int(estimation['model_context_length']*0.2)} tokens) for model response")
+        print(f"Max input tokens: {estimation['max_input_tokens']} tokens (80% of model context)")
         
         # Use the hierarchical AST-aware chunking system to prepare prompts
+        print("\n=== HIERARCHICAL CHUNKING PROCESS ===")
         prompts = process_code_for_llm(
             base_dir, 
             file_paths, 
             file_contents, 
             prompt_template
         )
+        
+        # Log detailed chunking information
+        print(f"\n=== CHUNKING STATISTICS ===")
+        print(f"Total chunks generated: {len(prompts)}")
+        total_tokens = 0
+        for i, prompt_data in enumerate(prompts):
+            chunk_tokens = prompt_data.get('estimated_tokens', 'unknown')
+            total_tokens += chunk_tokens if isinstance(chunk_tokens, int) else 0
+            print(f"  Chunk {i+1}: {chunk_tokens} tokens, ID: {prompt_data.get('chunk_id', 'unknown')}")
+        
+        if prompts and 'overlap_percentage' in prompts[0]:
+            print(f"Chunk overlap percentage: {prompts[0]['overlap_percentage']}%")
+        
+        # Calculate average tokens per chunk
+        if len(prompts) > 0 and total_tokens > 0:
+            print(f"Average tokens per chunk: {total_tokens / len(prompts):.2f}")
+        
+        print(f"Total files: {len(file_paths)}")
+        print(f"Total lines of code: {sum(len(content.splitlines()) for content in file_contents.values())}")
+        print("=" * 40)
         
         return (
             prompts,
@@ -156,20 +178,29 @@ class IdentifyAbstractions(Node):
             language,
             use_cache,
         ) = prep_res  # Unpack all parameters
-        print(f"Identifying abstractions using LLM with hierarchical AST-aware chunking...")
+        print(f"\n=== PROCESSING CHUNKS WITH LLM ===")
         print(f"Processing {len(prompts)} code chunks...")
 
         # Process all chunks and combine results
+        print(f"Starting batch processing of {len(prompts)} chunks...")
         processed_results = batch_process_chunks(prompts, call_llm, use_cache=use_cache)
+        print(f"Completed batch processing")
         
         # Extract and combine abstractions from all chunks
         combined_abstractions = []
         abstraction_tracker = {}  # Track abstractions by name to avoid duplicates
         
+        # Log details for tracking abstraction processing
+        print("\n=== ABSTRACTION PROCESSING DETAILS ===")
+        total_raw_abstractions = 0
+        chunk_abstraction_counts = {}
+        
         try:
             for chunk_result in processed_results:
+                chunk_id = chunk_result.get('chunk_id', 'unknown')
+                
                 if "error" in chunk_result:
-                    print(f"Warning: Error processing chunk {chunk_result['chunk_id']}: {chunk_result['error']}")
+                    print(f"Warning: Error processing chunk {chunk_id}: {chunk_result['error']}")
                     continue
                     
                 # Get the response for this chunk
@@ -189,6 +220,14 @@ class IdentifyAbstractions(Node):
                     # Parse the JSON
                     chunk_abstractions = json5.loads(abstractions_json)
                     
+                    # Log the number of abstractions found in this chunk
+                    abstraction_count = len(chunk_abstractions)
+                    total_raw_abstractions += abstraction_count
+                    chunk_abstraction_counts[chunk_id] = abstraction_count
+                    
+                    print(f"Chunk {chunk_id}: {abstraction_count} abstractions found")
+                    print(f"  Abstractions: {', '.join([a.get('name', 'Unknown') for a in chunk_abstractions])}")
+                    
                     # Process each abstraction from this chunk
                     for abstraction in chunk_abstractions:
                         # Ensure required fields are present
@@ -202,13 +241,24 @@ class IdentifyAbstractions(Node):
                         if norm_name in abstraction_tracker:
                             # Update existing abstraction
                             existing = abstraction_tracker[norm_name]
+                            # Log duplication found
+                            print(f"  Duplicate found: \"{abstraction['name']}\" merging with existing abstraction")
+                            
                             # Merge file indices (avoid duplicates)
-                            existing["file_indices"] = list(set(existing["file_indices"] + abstraction["file_indices"]))
+                            old_indices = set(existing["file_indices"])
+                            new_indices = set(abstraction["file_indices"])
+                            combined_indices = old_indices.union(new_indices)
+                            
+                            if len(combined_indices) > len(old_indices):
+                                print(f"    Added {len(combined_indices) - len(old_indices)} new file indices")
+                            
+                            existing["file_indices"] = list(combined_indices)
                         else:
                             # Add new abstraction to tracker
+                            print(f"  New abstraction: \"{abstraction['name']}\"")
                             abstraction_tracker[norm_name] = abstraction
                 except Exception as e:
-                    print(f"Warning: Failed to parse abstractions from chunk {chunk_result['chunk_id']}: {e}")
+                    print(f"Warning: Failed to parse abstractions from chunk {chunk_id}: {e}")
                     # Log the problematic response for debugging
                     print(f"Response text: {result[:100]}...")
             
@@ -218,7 +268,27 @@ class IdentifyAbstractions(Node):
             # Sort abstractions for consistent output
             combined_abstractions.sort(key=lambda x: x["name"])
             
+            # Log deduplication summary
+            print("\n=== ABSTRACTION DEDUPLICATION SUMMARY ===")
+            print(f"Total raw abstractions across all chunks: {total_raw_abstractions}")
+            print(f"Unique abstractions after deduplication: {len(combined_abstractions)}")
+            print(f"Removed duplicates: {total_raw_abstractions - len(combined_abstractions)}")
+            
+            # List all chunks with their abstraction counts
+            print("\nAbstractions per chunk:")
+            for chunk_id, count in chunk_abstraction_counts.items():
+                print(f"  Chunk {chunk_id}: {count} abstractions")
+            
+            # Calculate average abstractions per chunk
+            if chunk_abstraction_counts:
+                avg_abstractions = sum(chunk_abstraction_counts.values()) / len(chunk_abstraction_counts)
+                print(f"Average abstractions per chunk: {avg_abstractions:.2f}")
+            
             print(f"Successfully extracted {len(combined_abstractions)} unique abstractions across all chunks")
+            print("Final abstractions:")
+            for i, abstraction in enumerate(combined_abstractions):
+                print(f"  {i+1}. {abstraction['name']}")
+            print("=" * 40)
             
         except Exception as e:
             print(f"Error processing abstraction results: {e}")
@@ -297,6 +367,7 @@ class IdentifyAbstractions(Node):
         shared["abstractions"] = exec_res
         
         # Log summary of identified abstractions
+        print(f"\n=== FINAL ABSTRACTIONS SUMMARY ===")
         print(f"Identified {len(exec_res)} abstractions:")
         for i, abstraction in enumerate(exec_res):
             print(f"  {i+1}. {abstraction['name']}: {abstraction['description'][:60]}...")
@@ -308,6 +379,7 @@ class IdentifyAbstractions(Node):
                     if isinstance(idx, (int, str)) and 0 <= int(idx) < len(prep_res[1]):
                         file_paths.append(prep_res[1][int(idx)][1])
                 print(f"     Found in {len(file_paths)} files")
+        print("=" * 40)
         
         # Return a string action instead of the shared dictionary
         return "default"

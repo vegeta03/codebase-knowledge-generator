@@ -919,7 +919,8 @@ class CodeChunkingManager:
 
 def chunk_codebase(base_dir: str, 
                   file_paths: List[str], 
-                  file_contents: Dict[str, str]) -> List[Dict[str, Any]]:
+                  file_contents: Dict[str, str],
+                  overlap_ratio: float = 0.2) -> List[Dict[str, Any]]:
     """
     Main entry point for codebase chunking.
     
@@ -927,34 +928,126 @@ def chunk_codebase(base_dir: str,
         base_dir: Base directory of the codebase
         file_paths: List of file paths to process
         file_contents: Dict mapping file paths to their contents
+        overlap_ratio: Ratio of content to overlap between chunks (default: 0.2)
         
     Returns:
         List of dictionaries representing the final chunks, ready for LLM input
     """
     manager = CodeChunkingManager(base_dir)
     
-    # Generate hierarchical chunks for all files
-    all_chunks = manager.chunk_files(file_paths, file_contents)
-    
     # Get the current model values
     current_model_context_length = get_model_context_length()
     current_max_input_tokens = get_max_input_tokens()
     
+    logger.info(f"Starting hierarchical AST-aware chunking with model context length: {current_model_context_length}")
+    logger.info(f"Maximum input tokens (80% of context): {current_max_input_tokens}")
+    logger.info(f"Overlap ratio: {overlap_ratio * 100}%")
+    logger.info(f"Processing {len(file_paths)} files with total size: {sum(len(file_contents.get(f, '')) for f in file_paths)} characters")
+    
+    # Log language support
+    logger.info(f"Tree-sitter available: {TREE_SITTER_AVAILABLE}")
+    logger.info(f"Supported languages: {', '.join(sorted(AVAILABLE_LANGUAGES)) if AVAILABLE_LANGUAGES else 'None'}")
+    
+    # Track extensions
+    extensions = {}
+    for path in file_paths:
+        ext = os.path.splitext(path)[1].lower()
+        extensions[ext] = extensions.get(ext, 0) + 1
+    
+    logger.info(f"File extensions in codebase: {extensions}")
+    
+    # Generate hierarchical chunks for all files
+    logger.info("Generating hierarchical chunks...")
+    all_chunks = manager.chunk_files(file_paths, file_contents)
+    
+    # Log hierarchical chunk statistics
+    level_counts = {}
+    language_counts = {}
+    
+    for chunk in all_chunks:
+        level_counts[chunk.level] = level_counts.get(chunk.level, 0) + 1
+        language_counts[chunk.lang] = language_counts.get(chunk.lang, 0) + 1
+    
+    logger.info(f"Generated {len(all_chunks)} hierarchical chunks")
+    logger.info(f"Chunks by level: {level_counts}")
+    logger.info(f"Chunks by language: {language_counts}")
+    
+    # Calculate total tokens in hierarchical chunks
+    total_hierarchical_tokens = sum(chunk.est_tokens for chunk in all_chunks)
+    logger.info(f"Total tokens in hierarchical chunks: {total_hierarchical_tokens}")
+    
     # Create overlapping chunks that fit within token limits
+    logger.info(f"Creating overlapping chunks with max tokens: {current_max_input_tokens}, overlap ratio: {overlap_ratio * 100}%")
     combined_chunks = manager.create_overlapping_chunks(
         all_chunks, 
-        max_tokens=current_max_input_tokens
+        max_tokens=current_max_input_tokens,
+        overlap_ratio=overlap_ratio
     )
+    
+    # Calculate statistics for combined chunks
+    total_combined_tokens = sum(chunk.est_tokens for chunk in combined_chunks)
+    avg_tokens_per_chunk = total_combined_tokens / len(combined_chunks) if combined_chunks else 0
+    max_tokens_chunk = max(chunk.est_tokens for chunk in combined_chunks) if combined_chunks else 0
+    min_tokens_chunk = min(chunk.est_tokens for chunk in combined_chunks) if combined_chunks else 0
+    
+    logger.info(f"Created {len(combined_chunks)} combined chunks")
+    logger.info(f"Total tokens in combined chunks: {total_combined_tokens}")
+    logger.info(f"Average tokens per chunk: {avg_tokens_per_chunk:.2f}")
+    logger.info(f"Max tokens in a chunk: {max_tokens_chunk}")
+    logger.info(f"Min tokens in a chunk: {min_tokens_chunk}")
+    logger.info(f"Token utilization: {(avg_tokens_per_chunk / current_max_input_tokens) * 100:.2f}% of max input")
+    
+    # Calculate coverage percentage
+    overlap_tokens = int(current_max_input_tokens * overlap_ratio)
+    logger.info(f"Overlap tokens per chunk: {overlap_tokens} ({overlap_ratio * 100}% of max input)")
     
     # Convert to a format suitable for LLM input
     result = []
     for i, chunk in enumerate(combined_chunks):
+        # Calculate what percentage of context this chunk uses
+        utilization_percentage = (chunk.est_tokens / current_max_input_tokens) * 100
+        
         result.append({
             "chunk_id": i,
             "content": chunk.content,
             "token_count": chunk.est_tokens,
+            "token_utilization": f"{utilization_percentage:.2f}%",
             "files": chunk.file_path.split(";"),
+            "level": chunk.level,
+            "overlap_percentage": overlap_ratio * 100,
+            "overlap_tokens": overlap_tokens
         })
+    
+    # Log chunk size distribution
+    if result:
+        # Count chunks in different size ranges
+        size_ranges = {
+            "0-20%": 0,
+            "20-40%": 0,
+            "40-60%": 0,
+            "60-80%": 0,
+            "80-100%": 0
+        }
+        
+        for chunk in result:
+            utilization = (chunk["token_count"] / current_max_input_tokens) * 100
+            if utilization < 20:
+                size_ranges["0-20%"] += 1
+            elif utilization < 40:
+                size_ranges["20-40%"] += 1
+            elif utilization < 60:
+                size_ranges["40-60%"] += 1
+            elif utilization < 80:
+                size_ranges["60-80%"] += 1
+            else:
+                size_ranges["80-100%"] += 1
+        
+        logger.info(f"Chunk size distribution (% of max input tokens):")
+        for range_name, count in size_ranges.items():
+            percentage = (count / len(result)) * 100
+            logger.info(f"  {range_name}: {count} chunks ({percentage:.2f}%)")
+    
+    logger.info(f"Final chunk count: {len(result)}")
     
     return result
 
