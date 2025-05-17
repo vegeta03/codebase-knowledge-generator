@@ -397,6 +397,28 @@ class AnalyzeRelationships(Node):
          ) = prep_res  # Unpack use_cache
         print(f"Analyzing relationships using LLM...")
 
+        # Handle the case where there are no abstractions
+        if num_abstractions == 0:
+            print("Warning: No abstractions found. Creating a default abstraction.")
+            # Create a default placeholder abstraction and return it along with relationships
+            default_abstraction = {
+                "name": "Project Overview",
+                "description": f"Overview of the {project_name} project structure and functionality.",
+                "file_indices": []
+            }
+            
+            # Will be handled in post method
+            return {
+                "create_default_abstraction": True,
+                "default_abstraction": default_abstraction,
+                "summary": f"This is a {language} tutorial for the {project_name} project.",
+                "details": [{
+                    "from": 0,
+                    "to": 0,
+                    "label": "Self-reference"
+                }]
+            }
+            
         # Add language instruction and hints only if not English
         language_instruction = ""
         lang_hint = ""
@@ -546,14 +568,24 @@ Now, provide the JSON5 output:
                 if not (0 <= from_idx < num_abstractions):
                     print(f"Warning: Invalid 'from' index {from_idx} in relationship. Max index is {num_abstractions-1}.")
                     # Try to fix by using a valid index
-                    from_idx = from_idx % num_abstractions
-                    print(f"Auto-correcting to index {from_idx}")
+                    if num_abstractions > 0:
+                        from_idx = from_idx % num_abstractions
+                        print(f"Auto-correcting to index {from_idx}")
+                    else:
+                        # Handle case where num_abstractions is zero
+                        print("No abstractions available. Using default index 0.")
+                        from_idx = 0
 
                 if not (0 <= to_idx < num_abstractions):
                     print(f"Warning: Invalid 'to' index {to_idx} in relationship. Max index is {num_abstractions-1}.")
                     # Try to fix by using a valid index
-                    to_idx = to_idx % num_abstractions
-                    print(f"Auto-correcting to index {to_idx}")
+                    if num_abstractions > 0:
+                        to_idx = to_idx % num_abstractions
+                        print(f"Auto-correcting to index {to_idx}")
+                    else:
+                        # Handle case where num_abstractions is zero
+                        print("No abstractions available. Using default index 0.")
+                        to_idx = 0
 
                 # Add the validated relationship
                 validated_relationships.append(
@@ -577,8 +609,13 @@ Now, provide the JSON5 output:
                     to_matches = re.findall(r'\d+', to_str)
 
                     if from_matches and to_matches:
-                        from_idx = int(from_matches[0]) % num_abstractions
-                        to_idx = int(to_matches[0]) % num_abstractions
+                        if num_abstractions > 0:
+                            from_idx = int(from_matches[0]) % num_abstractions
+                            to_idx = int(to_matches[0]) % num_abstractions
+                        else:
+                            from_idx = 0
+                            to_idx = 0
+                            print("No abstractions available. Using default indices 0, 0.")
 
                         print(f"Auto-corrected indices: from={from_idx}, to={to_idx}")
 
@@ -621,7 +658,10 @@ Now, provide the JSON5 output:
             if i not in involved_abstractions:
                 print(f"Warning: Abstraction {i} is not involved in any relationship. Adding a default relationship.")
                 # Add a relationship from this abstraction to the next one (or the first one if this is the last)
-                to_idx = (i + 1) % num_abstractions
+                if num_abstractions > 1:
+                    to_idx = (i + 1) % num_abstractions
+                else:
+                    to_idx = i  # Self-reference if only one abstraction
                 validated_relationships.append({
                     "from": i,
                     "to": to_idx,
@@ -638,7 +678,19 @@ Now, provide the JSON5 output:
     def post(self, shared, prep_res, exec_res):
         # Structure is now {"summary": str, "details": [{"from": int, "to": int, "label": str}]}
         # Summary and label might be translated
-        shared["relationships"] = exec_res
+
+        # Handle the case where we created a default abstraction
+        if exec_res.get("create_default_abstraction", False):
+            shared["abstractions"] = [exec_res["default_abstraction"]]
+            # Remove the special flags we added
+            clean_res = {
+                "summary": exec_res["summary"],
+                "details": exec_res["details"]
+            }
+            shared["relationships"] = clean_res
+        else:
+            shared["relationships"] = exec_res
+            
         return "default"
 
 class OrderChapters(Node):

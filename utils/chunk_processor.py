@@ -13,11 +13,15 @@ import logging
 from typing import List, Dict, Any, Optional, Union, Tuple
 import re
 
-# Import the code chunking system
-from utils.code_chunking import chunk_codebase, MAX_INPUT_TOKENS, MODEL_CONTEXT_LENGTH
-
 # Set up logging
 logger = logging.getLogger("chunk_processor")
+
+# Import the code chunking system
+from utils.code_chunking import chunk_codebase, DEFAULT_MODEL_CONTEXT_LENGTH
+
+# Get model context length from environment or default
+MODEL_CONTEXT_LENGTH = int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
+MAX_INPUT_TOKENS = int(MODEL_CONTEXT_LENGTH * 0.8)
 
 def process_code_for_llm(base_dir: str, 
                         file_paths: List[str], 
@@ -38,12 +42,16 @@ def process_code_for_llm(base_dir: str,
     Returns:
         List of dictionaries with prepared prompts and metadata
     """
+    # Re-read environment variable at runtime to ensure latest value
+    current_model_context_length = int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
+    max_input_tokens = int(current_model_context_length * 0.8)
+    
     # Calculate effective max tokens for code (accounting for prompt overhead)
-    effective_max_tokens = MAX_INPUT_TOKENS - prompt_token_estimate
+    effective_max_tokens = max_input_tokens - prompt_token_estimate
     
     # Log the context settings
-    logger.info(f"Model context length: {MODEL_CONTEXT_LENGTH}")
-    logger.info(f"Max input tokens (80%): {MAX_INPUT_TOKENS}")
+    logger.info(f"Model context length: {current_model_context_length}")
+    logger.info(f"Max input tokens (80%): {max_input_tokens}")
     logger.info(f"Effective max tokens for code: {effective_max_tokens}")
     
     # Generate chunks using the hierarchical AST-aware chunking system
@@ -62,7 +70,7 @@ def process_code_for_llm(base_dir: str,
                 "chunk_id": chunk["chunk_id"],
                 "files": chunk["files"],
                 "token_count": chunk["token_count"] + prompt_token_estimate,
-                "estimated_response_tokens": int(MODEL_CONTEXT_LENGTH * 0.2)
+                "estimated_response_tokens": int(current_model_context_length * 0.2)
             })
         else:
             # This should rarely happen with proper chunking, but log it if it does
@@ -88,6 +96,10 @@ def estimate_model_calls(file_paths: List[str],
     Returns:
         Dictionary with estimation details
     """
+    # Re-read environment variable at runtime to ensure latest value
+    current_model_context_length = int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
+    max_input_tokens = int(current_model_context_length * 0.8)
+    
     # Just get total code size for estimation
     total_chars = sum(len(content) for content in file_contents.values())
     total_files = len(file_paths)
@@ -96,12 +108,12 @@ def estimate_model_calls(file_paths: List[str],
     estimated_tokens = total_chars / 4
     
     # Estimate number of chunks needed (assuming 80% of context length per chunk)
-    effective_max_tokens = MAX_INPUT_TOKENS - prompt_token_overhead
+    effective_max_tokens = max_input_tokens - prompt_token_overhead
     estimated_chunks = max(1, int(estimated_tokens / effective_max_tokens) + 1)
     
     # Estimate total token usage including prompt overhead and response tokens
     total_input_tokens = estimated_tokens + (prompt_token_overhead * estimated_chunks)
-    total_response_tokens = estimated_chunks * (MODEL_CONTEXT_LENGTH * 0.2)
+    total_response_tokens = estimated_chunks * (current_model_context_length * 0.2)
     
     return {
         "files": total_files,
@@ -110,7 +122,7 @@ def estimate_model_calls(file_paths: List[str],
         "estimated_input_tokens": int(total_input_tokens),
         "estimated_response_tokens": int(total_response_tokens),
         "total_tokens": int(total_input_tokens + total_response_tokens),
-        "model_context_length": MODEL_CONTEXT_LENGTH
+        "model_context_length": current_model_context_length
     }
 
 

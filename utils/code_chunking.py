@@ -23,53 +23,23 @@ import re
 # Set up logging
 logger = logging.getLogger("code_chunker")
 
-# Try to import tree-sitter and set up available languages
-try:
-    import tree_sitter
-    TREE_SITTER_AVAILABLE = True
-    AVAILABLE_LANGUAGES = set()
-    
-    # Try to import typescript support using our custom wrapper
-    try:
-        from utils.typescript_support import get_typescript_parser, get_tsx_parser
-        
-        # Test if we can actually get TypeScript parser
-        ts_parser, _ = get_typescript_parser()
-        if ts_parser is not None:
-            AVAILABLE_LANGUAGES.add('typescript')
-            logger.info("Tree-sitter TypeScript support loaded successfully")
-        
-        # Test if we can actually get TSX parser
-        tsx_parser, _ = get_tsx_parser()
-        if tsx_parser is not None:
-            AVAILABLE_LANGUAGES.add('tsx')
-            logger.info("Tree-sitter TSX support loaded successfully")
-            
-        if not AVAILABLE_LANGUAGES:
-            logger.warning("TypeScript/TSX parsers could not be initialized")
-    except ImportError as e:
-        logger.warning(f"TypeScript support module not found: {e}")
-        
-    # More languages could be added here as needed
-    
-except ImportError:
-    TREE_SITTER_AVAILABLE = False
-    AVAILABLE_LANGUAGES = set()
-    logger.warning("Tree-sitter not available - using fallback code chunking mechanism instead")
-
-# The entire tree-sitter integration code has been removed and replaced with a consistent fallback mechanism.
-# This ensures compatibility across different environments and provides reliable chunking for all languages.
-# TypeScript will be handled by the fallback chunker just like other languages.
-
-
 # Default model context length if not specified in environment
 DEFAULT_MODEL_CONTEXT_LENGTH = 8192
 
 # Get model context length from environment
-MODEL_CONTEXT_LENGTH = int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
+def get_model_context_length():
+    """Get the current model context length from environment or use default"""
+    return int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
 
 # Reserve 20% of context for model response
-MAX_INPUT_TOKENS = int(MODEL_CONTEXT_LENGTH * 0.8)
+def get_max_input_tokens():
+    """Calculate max input tokens based on current model context length"""
+    return int(get_model_context_length() * 0.8)
+
+# For backward compatibility - these values will be used by other modules
+# but we'll override the MODEL_CONTEXT_LENGTH and MAX_INPUT_TOKENS at runtime
+MODEL_CONTEXT_LENGTH = get_model_context_length()
+MAX_INPUT_TOKENS = get_max_input_tokens()
 
 # Language mapping from file extensions to tree-sitter language names
 LANGUAGE_MAPPING = {
@@ -122,12 +92,66 @@ LANGUAGE_MAPPING = {
     ".kt": "kotlin",
 }
 
+# Try to import tree-sitter and set up available languages
+try:
+    import tree_sitter
+    TREE_SITTER_AVAILABLE = True
+    AVAILABLE_LANGUAGES = set()
+    
+    # Try to import typescript support using our custom wrapper
+    try:
+        from utils.typescript_support import get_typescript_parser, get_tsx_parser
+        
+        # Test if we can actually get TypeScript parser
+        ts_parser, _ = get_typescript_parser()
+        if ts_parser is not None:
+            AVAILABLE_LANGUAGES.add('typescript')
+            logger.info("Tree-sitter TypeScript support loaded successfully")
+        
+        # Test if we can actually get TSX parser
+        tsx_parser, _ = get_tsx_parser()
+        if tsx_parser is not None:
+            AVAILABLE_LANGUAGES.add('tsx')
+            logger.info("Tree-sitter TSX support loaded successfully")
+            
+        if not AVAILABLE_LANGUAGES:
+            logger.warning("TypeScript/TSX parsers could not be initialized")
+    except ImportError as e:
+        logger.warning(f"TypeScript support module not found: {e}")
+        
+    # Additional languages support - attempt to load tree-sitter-language-pack
+    try:
+        from tree_sitter_language_pack import get_parser, get_language
+        
+        # For each language in LANGUAGE_MAPPING, try to load it from tree-sitter-language-pack
+        for ext, lang in LANGUAGE_MAPPING.items():
+            if lang not in AVAILABLE_LANGUAGES:
+                try:
+                    parser = get_parser(lang)
+                    if parser is not None:
+                        AVAILABLE_LANGUAGES.add(lang)
+                        logger.info(f"Tree-sitter {lang} support loaded successfully")
+                except (ImportError, ValueError, AttributeError, Exception) as e:
+                    # Silently continue if a language isn't available
+                    pass
+                
+        logger.info(f"Total available languages: {len(AVAILABLE_LANGUAGES)}")
+        
+    except ImportError:
+        logger.warning("tree-sitter-language-pack not available, only TypeScript and TSX supported")
+        
+except ImportError:
+    TREE_SITTER_AVAILABLE = False
+    AVAILABLE_LANGUAGES = set()
+    logger.warning("Tree-sitter not available - using fallback code chunking mechanism instead")
+
 # Node types that represent different hierarchical levels for different languages
 # Level 3: Class/Module level
 CLASS_MODULE_TYPES = {
     "python": ["class_definition", "module"],
     "java": ["class_declaration", "interface_declaration", "enum_declaration"],
-    "typescript": ["class_declaration", "interface_declaration", "namespace_declaration", "module"],
+    "typescript": ["class_declaration", "interface_declaration", "namespace_declaration", "module", "type_alias_declaration"],
+    "tsx": ["class_declaration", "interface_declaration", "namespace_declaration", "module", "type_alias_declaration"],
     "javascript": ["class_declaration", "program"],
     "c_sharp": ["class_declaration", "interface_declaration", "namespace_declaration"],
     "rust": ["impl_item", "trait_definition", "mod_item"],
@@ -143,7 +167,8 @@ CLASS_MODULE_TYPES = {
 FUNCTION_METHOD_TYPES = {
     "python": ["function_definition", "decorated_definition"],
     "java": ["method_declaration", "constructor_declaration"],
-    "typescript": ["function_declaration", "method_definition", "arrow_function"],
+    "typescript": ["function_declaration", "method_definition", "arrow_function", "constructor_declaration"],
+    "tsx": ["function_declaration", "method_definition", "arrow_function", "constructor_declaration"],
     "javascript": ["function_declaration", "method_definition", "arrow_function"],
     "c_sharp": ["method_declaration", "constructor_declaration"],
     "rust": ["function_item", "function_signature_item", "impl_function_statement"],
@@ -162,7 +187,9 @@ STATEMENT_TYPES = {
     "java": ["if_statement", "for_statement", "while_statement", "try_statement", "switch_statement", 
              "return_statement", "expression_statement", "assert_statement"],
     "typescript": ["if_statement", "for_statement", "while_statement", "try_statement", "switch_statement", 
-                  "return_statement", "expression_statement"],
+                  "return_statement", "expression_statement", "variable_declaration", "await_expression"],
+    "tsx": ["if_statement", "for_statement", "while_statement", "try_statement", "switch_statement", 
+           "return_statement", "expression_statement", "variable_declaration", "jsx_element", "jsx_fragment"],
     "javascript": ["if_statement", "for_statement", "while_statement", "try_statement", "switch_statement", 
                   "return_statement", "expression_statement"],
     "c_sharp": ["if_statement", "for_statement", "foreach_statement", "while_statement", "try_statement", 
@@ -204,50 +231,45 @@ class CodeChunk:
         self.content = content
         self.file_path = file_path
         self.lang = lang
-        self.level = level  # 1=Directory, 2=File, 3=Class/Module, 4=Function/Method, 5=Statement
+        self.level = level  # 1=dir, 2=file, 3=class, 4=function, 5=statement
         self.start_line = start_line
         self.end_line = end_line
         self.node_type = node_type
         self.parent_chunk = parent_chunk
-        self.token_count = estimate_tokens(content)
-        
+        self.est_tokens = estimate_tokens(content)
+    
     def __repr__(self):
-        return (f"CodeChunk(level={self.level}, lang={self.lang}, "
-                f"file={os.path.basename(self.file_path)}, "
-                f"lines={self.start_line}-{self.end_line}, "
-                f"tokens={self.token_count}, type={self.node_type})")
+        path = os.path.basename(self.file_path)
+        return f"CodeChunk(level={self.level}, path='{path}', lines={self.start_line}-{self.end_line}, type={self.node_type}, tokens={self.est_tokens})"
     
     def get_hierarchy_path(self) -> str:
-        """Get the hierarchical path of this chunk."""
+        """Get the hierarchical path for this chunk."""
         if self.parent_chunk:
-            return f"{self.parent_chunk.get_hierarchy_path()} > {self.node_type}"
-        return self.node_type
-
+            parent_path = self.parent_chunk.get_hierarchy_path()
+            return f"{parent_path} > {self.node_type}[{self.start_line}-{self.end_line}]"
+        return f"{os.path.basename(self.file_path)}:{self.node_type}[{self.start_line}-{self.end_line}]"
 
 class ASTChunker:
-    """
-    Abstract base class for AST-based code chunkers.
-    Implement language-specific chunking logic in derived classes.
-    """
+    """Abstract base class for AST-based code chunkers."""
     
     def __init__(self):
-        self.parser = None
-        
+        pass
+    
     def extract_chunks(self, file_path: str, content: str) -> List[CodeChunk]:
-        """Extract chunks from the given file content."""
+        """Extract chunks from the given content."""
         raise NotImplementedError("Subclasses must implement extract_chunks")
     
     def _line_col_to_position(self, content: str, line: int, col: int) -> int:
-        """Convert line and column to absolute position in string."""
-        lines = content.split("\n")
+        """Convert line and column to a position within the string."""
+        lines = content.split('\n')
         position = sum(len(lines[i]) + 1 for i in range(line))
-        return position + col
+        position += col
+        return position
     
     def _get_source_lines(self, content: str, start_line: int, end_line: int) -> str:
-        """Get source lines from content."""
-        lines = content.split("\n")
-        return "\n".join(lines[start_line:end_line+1])
-
+        """Extract lines from the content."""
+        lines = content.split('\n')
+        return '\n'.join(lines[start_line:end_line + 1])
 
 class TreeSitterChunker(ASTChunker):
     """
@@ -258,15 +280,13 @@ class TreeSitterChunker(ASTChunker):
     def __init__(self, lang: str):
         super().__init__()
         self.lang = lang
-        
-        # Use fallback as default until successful parser initialization
         self.parser = None
         self.language = None
         
         if not TREE_SITTER_AVAILABLE:
             logger.warning(f"Tree-sitter not available, using fallback for {lang}")
             return
-        
+            
         # Check if this language is in our list of available languages
         if lang not in AVAILABLE_LANGUAGES:
             logger.warning(f"Tree-sitter parser for language '{lang}' not available, using fallback chunking")
@@ -303,26 +323,35 @@ class TreeSitterChunker(ASTChunker):
                     logger.warning(f"Using fallback for {lang}")
                     return
             else:
-                # Map language ID to tree-sitter language name for other languages
-                ts_lang_map = {
-                    'javascript': 'javascript',
-                    'python': 'python',
-                    'java': 'java',
-                    'c_sharp': 'c_sharp',
-                    'go': 'go',
-                    'rust': 'rust',
-                    'cpp': 'cpp',
-                    'c': 'c'
-                }
-                
-                # Use the mapped language name or the original if not in map
-                ts_lang = ts_lang_map.get(lang, lang)
-                
+                # For other languages, try to use tree-sitter-language-pack
                 try:
-                    # Get parser using our compatibility-aware function
+                    from tree_sitter_language_pack import get_parser, get_language
+                    
+                    # Map language ID to tree-sitter language name for other languages
+                    ts_lang_map = {
+                        'javascript': 'javascript',
+                        'python': 'python',
+                        'java': 'java',
+                        'c_sharp': 'c_sharp',
+                        'go': 'go',
+                        'rust': 'rust',
+                        'cpp': 'cpp',
+                        'c': 'c',
+                        # Add more mappings as needed
+                    }
+                    
+                    # Use the mapped language name or the original if not in map
+                    ts_lang = ts_lang_map.get(lang, lang)
+                    
+                    # Get parser and language using tree-sitter-language-pack
                     self.parser = get_parser(ts_lang)
-                    # Get language using our compatibility-aware function
                     self.language = get_language(ts_lang)
+                    logger.info(f"Using tree-sitter-language-pack for {lang}")
+                    
+                except (ImportError, ValueError, AttributeError) as e:
+                    logger.warning(f"Failed to get parser/language from tree-sitter-language-pack: {e}")
+                    logger.warning(f"Using fallback for {lang}")
+                    return
                 except Exception as e:
                     logger.error(f"Failed to get parser/language for {ts_lang}: {e}")
                     logger.warning(f"Using fallback for {lang}")
@@ -333,7 +362,7 @@ class TreeSitterChunker(ASTChunker):
             logger.error(f"Failed to initialize TreeSitterChunker for language '{lang}': {e}")
             logger.warning(f"Using fallback text-based chunking for language '{lang}'")
             # parser remains None to trigger fallback processing
-    
+
     def extract_chunks(self, file_path: str, content: str) -> List[CodeChunk]:
         """
         Extract hierarchical chunks from the given file content using tree-sitter.
@@ -795,7 +824,7 @@ class CodeChunkingManager:
         return all_chunks
     
     def create_overlapping_chunks(self, chunks: List[CodeChunk], 
-                                 max_tokens: int = MAX_INPUT_TOKENS,
+                                 max_tokens: int = None,
                                  overlap_ratio: float = 0.2) -> List[CodeChunk]:
         """
         Create overlapping chunks that fit within token limits.
@@ -810,6 +839,13 @@ class CodeChunkingManager:
         """
         if not chunks:
             return []
+            
+        # If max_tokens is not provided, use the current value from environment
+        if max_tokens is None:
+            max_tokens = get_max_input_tokens()
+            
+        # Calculate max overlap tokens
+        overlap_tokens = int(max_tokens * overlap_ratio)
             
         # Sort chunks by file_path and then by start_line to ensure
         # related chunks are grouped together
@@ -827,7 +863,7 @@ class CodeChunkingManager:
         for chunk in sorted_chunks:
             # If adding this chunk would exceed the token limit,
             # save the current combined chunk and start a new one
-            if current_chunk_tokens + chunk.token_count > max_tokens and current_chunk_content:
+            if current_chunk_tokens + chunk.est_tokens > max_tokens and current_chunk_content:
                 # Create the combined chunk
                 combined_chunk = CodeChunk(
                     content=current_chunk_content,
@@ -839,35 +875,15 @@ class CodeChunkingManager:
                 combined_chunks.append(combined_chunk)
                 
                 # Start a new chunk with overlap from the previous one
-                if current_hierarchy:
-                    # Create an overlap section using the last part of the previous chunk
-                    # This helps maintain context between chunks
-                    overlap_tokens = int(max_tokens * overlap_ratio)
-                    overlap_chunks = []
-                    
-                    # Add chunks from the end of the previous combined chunk
+                overlap_chunks = []
+                if overlap_tokens > 0:
                     overlap_token_count = 0
                     for prev_chunk in reversed(current_hierarchy):
-                        if overlap_token_count + prev_chunk.token_count <= overlap_tokens:
+                        if overlap_token_count + prev_chunk.est_tokens <= overlap_tokens:
                             overlap_chunks.insert(0, prev_chunk)
-                            overlap_token_count += prev_chunk.token_count
+                            overlap_token_count += prev_chunk.est_tokens
                         else:
                             break
-                    
-                    # Initialize the new combined chunk with the overlap
-                    current_chunk_content = ""
-                    current_files = set()
-                    current_chunk_tokens = 0
-                    current_hierarchy = []
-                    
-                    for overlap_chunk in overlap_chunks:
-                        header = f"\n# FILE: {os.path.basename(overlap_chunk.file_path)} (CONTINUED)\n"
-                        if current_chunk_content:
-                            current_chunk_content += header
-                        current_chunk_content += overlap_chunk.content
-                        current_files.add(overlap_chunk.file_path)
-                        current_chunk_tokens += overlap_chunk.token_count + estimate_tokens(header)
-                        current_hierarchy.append(overlap_chunk)
                 else:
                     current_chunk_content = ""
                     current_files = set()
@@ -884,7 +900,7 @@ class CodeChunkingManager:
             # Add this chunk to the current combined chunk
             current_chunk_content += chunk.content + "\n"
             current_files.add(chunk.file_path)
-            current_chunk_tokens += chunk.token_count + 1  # +1 for newline
+            current_chunk_tokens += chunk.est_tokens + 1  # +1 for newline
             current_hierarchy.append(chunk)
         
         # Don't forget to add the last combined chunk
@@ -920,8 +936,15 @@ def chunk_codebase(base_dir: str,
     # Generate hierarchical chunks for all files
     all_chunks = manager.chunk_files(file_paths, file_contents)
     
+    # Get the current model values
+    current_model_context_length = get_model_context_length()
+    current_max_input_tokens = get_max_input_tokens()
+    
     # Create overlapping chunks that fit within token limits
-    combined_chunks = manager.create_overlapping_chunks(all_chunks)
+    combined_chunks = manager.create_overlapping_chunks(
+        all_chunks, 
+        max_tokens=current_max_input_tokens
+    )
     
     # Convert to a format suitable for LLM input
     result = []
@@ -929,7 +952,7 @@ def chunk_codebase(base_dir: str,
         result.append({
             "chunk_id": i,
             "content": chunk.content,
-            "token_count": chunk.token_count,
+            "token_count": chunk.est_tokens,
             "files": chunk.file_path.split(";"),
         })
     
