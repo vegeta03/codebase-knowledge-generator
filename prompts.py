@@ -55,9 +55,18 @@ CRITICAL INSTRUCTION: Your primary task is to identify MAXIMUM number of core ab
 List of file indices and paths present in the context:
 {file_listing_for_prompt}
 
-Format the output as a JSON5 list of dictionaries:
+RESPONSE FORMAT REQUIREMENTS:
+1. Output ONLY a JSON5 list of dictionaries with NO explanatory text before or after
+2. Do NOT include any explanation, discussion, or notes about the JSON structure
+3. Do NOT describe what you're going to do - just provide the JSON5 directly
+4. Your entire response must be parseable as valid JSON5
+5. Start your response with the opening bracket "[" and end with the closing bracket "]"
+6. Each dictionary must contain exactly these three keys: "name", "description", and "file_indices"
+7. Use double curly braces {{ }} for the dictionary objects
+8. Remember to escape all internal curly braces properly, especially in the description text
 
-```json5
+Here is the exact format to follow. Begin your response immediately with this JSON5 structure:
+
 [
   {{
     "name": "Query Processing{name_lang_hint}",
@@ -75,8 +84,7 @@ Format the output as a JSON5 list of dictionaries:
     ]
   }}
   // ... include ALL distinct functional abstractions
-]
-```"""
+]"""
 
 
 def get_analyze_relationships_prompt(
@@ -130,9 +138,17 @@ IMPORTANT INSTRUCTIONS:
 6. Exclude any relationships that are solely testing-related. Do not focus on test frameworks, testing utilities, or test implementations when analyzing relationships.
 7. Be COMPREHENSIVE - identify ALL meaningful relationships, not just the most obvious ones.
 
-Format the output as JSON5:
+RESPONSE FORMAT REQUIREMENTS:
+1. Output ONLY a JSON5 object with NO explanatory text before or after
+2. Do NOT include any explanation, discussion, or notes about the JSON structure
+3. Do NOT describe what you're going to do - just provide the JSON5 directly
+4. Your entire response must be parseable as valid JSON5
+5. Start your response with the opening curly brace "{{" and end with the closing curly brace "}}"
+6. The JSON5 object must contain exactly these two keys: "summary" and "relationships"
+7. The "relationships" value must be an array of objects, each with "from_abstraction", "to_abstraction", and "label" keys
 
-```json5
+Here is the exact format to follow. Begin your response immediately with this JSON5 structure:
+
 {{
   "summary": "A brief, simple explanation of the project{lang_hint}. Can span multiple lines with **bold** and *italic* for emphasis. IMPORTANT: This must be a single string value, not multiple strings.",
   "relationships": [
@@ -148,11 +164,7 @@ Format the output as JSON5:
     }}
     // ... include ALL relationships between abstractions
   ]
-}}
-```
-
-Now, provide the JSON5 output:
-"""
+}}"""
 
 
 def get_order_chapters_prompt(
@@ -194,19 +206,23 @@ Create a logical progression that maximizes learning effectiveness:
 
 IMPORTANT: Do not prioritize testing frameworks, test utilities, or any testing-related abstractions in your ordering. Focus on explaining the core functionality of the application rather than how to test it.
 
-Output the ordered list of abstraction indices, including the name in a comment for clarity. Use the format `idx # AbstractionName`.
+RESPONSE FORMAT REQUIREMENTS:
+1. Output ONLY a JSON5 array with NO explanatory text before or after
+2. Do NOT include any explanation, discussion, or notes about the JSON structure
+3. Do NOT describe what you're going to do - just provide the JSON5 directly
+4. Your entire response must be parseable as valid JSON5
+5. Start your response with the opening bracket "[" and end with the closing bracket "]"
+6. Each array element must be a string in the format "idx # AbstractionName"
+7. Include ALL abstractions in your ordered list
 
-```json5
+Here is the exact format to follow. Begin your response immediately with this JSON5 structure:
+
 [
   "2 # FoundationalConcept",
   "0 # CoreClassA",
   "1 # CoreClassB (uses CoreClassA)",
   // ... include ALL abstractions in the optimal learning order
-]
-```
-
-Now, provide the JSON5 output:
-"""
+]"""
 
 
 def get_write_chapter_prompt(
@@ -273,42 +289,93 @@ Relevant Code Snippets (Code itself remains unchanged):
 Instructions for the chapter (Generate content in {language.capitalize()} unless specified otherwise):
 - Be STRICTLY LOSSLESS and COMPREHENSIVE - capture ALL aspects of this abstraction from the provided context/data.
 - The chapter should be thorough and detailed, covering the abstraction from basic concepts to advanced usage patterns.
+- **IMPORTANT**: Maintain a HIGHLY TECHNICAL writing style throughout. Readers are senior software developers who need in-depth technical explanations.
 
 - Start with a clear heading (e.g., `# Chapter {chapter_num}: {abstraction_name}`). Use the provided concept name.
 
 - If this is not the first chapter, begin with a brief transition from the previous chapter{instruction_lang_note}, referencing it with a proper Markdown link using its name{link_lang_note}.
 
-- Begin with a high-level motivation explaining what problem this abstraction solves{instruction_lang_note}. Start with a central use case as a concrete example. The whole chapter should guide the reader to understand how to solve this use case. Make it very comprehensive and very understandable to a Senior Software Developer.
+- Begin with a problem statement section that:
+  * Clearly articulates the technical challenge this abstraction solves{instruction_lang_note}
+  * Explains the architectural consequences of NOT having this abstraction
+  * Provides a concrete, technical example of the problem (with code if applicable)
+  * Uses a real-world analogy but immediately connects it back to the technical domain
 
-- If the abstraction is complex, break it down into key concepts. Explain each concept one-by-one in a very beginner-friendly way{instruction_lang_note}.
+- For each major aspect of the abstraction, create dedicated technical sections that:
+  * Begin with an H2/H3 heading clearly identifying the concept
+  * Provide detailed technical explanations of internal mechanisms, not just surface-level behavior
+  * Explain design patterns being applied (Singleton, Factory, Observer, etc.) with rationale
+  * Discuss technical trade-offs made in the implementation ("This approach optimizes for X at the cost of Y")
+  * Describe boundary conditions, edge cases, and error handling strategies
+  * Explore performance characteristics and scalability considerations
 
-- Explain how to use this abstraction to solve the use case{instruction_lang_note}. Give example inputs and outputs for code snippets (if the output isn't values, describe at a high level what will happen{instruction_lang_note}).
-
-- Include ALL relevant code examples for this abstraction from the codebase. If multiple implementations exist, compare and contrast them to provide complete coverage.
+- Include ALL relevant code examples for this abstraction from the codebase. For each code example:
+  * Show complete implementation details with proper context
+  * Annotate with line-by-line technical explanation of non-trivial aspects
+  * Highlight key design patterns, idioms, or language features being leveraged
+  * Note any optimizations or performance considerations
+  * If multiple implementations exist, compare and contrast their technical merits
 
 - Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}.
 
-- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - keep it minimal with at least 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n```{mermaid_lang_note}.
+- CRITICAL REQUIREMENT FOR BULLET POINTS: When using bullet points in your chapter, ALWAYS follow each bullet point with at least one detailed paragraph (5+ sentences) that thoroughly explains the technical aspects of that point. Never leave bullet points unexplained. For example:
 
-- Then dive deeper into code for the internal implementation with references to files. Provide example code blocks, but make them similarly simple however don't dilute it, and "Computer Science"-friendly. Explain{instruction_lang_note}.
+  * Define entity relationships
+    
+    Entity relationships establish the formal connections between domain objects, implementing concepts like aggregation, composition, and association from object-oriented design. These relationships transcend mere references between objects, encoding cardinality constraints (one-to-many, many-to-many), cascading behaviors for persistence operations, and navigability rules that dictate traversal paths through the domain model. Well-defined relationships serve as the semantic foundation for data integrity rules, enabling the system to enforce business invariants through referential integrity constraints. They also inform how change propagation occurs throughout the system when state modifications happen to related entities.
+
+- EXPLICITLY ENSURE all bullet points are expanded with detailed paragraphs. The detailed explanations should include:
+  * Underlying theoretical computer science principles
+  * Implementation considerations and technical trade-offs
+  * Performance implications and optimization strategies 
+  * Common design variations and their consequences
+  * Language-agnostic explanations that focus on core concepts rather than specific syntax
+
+- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a detailed sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - include at least 5-8 participants to ensure proper representation of the flow. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n```{mermaid_lang_note}.
+
+- Then dive deeper into code for the internal implementation with references to files. Provide explicit technical details on:
+  * Initialization sequences and dependency management
+  * Runtime behavior and control flow
+  * Memory management considerations (if applicable)
+  * Threading/concurrency concerns (if applicable)
+  * How errors propagate through the system
+  * Performance optimizations implemented (caching, lazy loading, etc.)
 
 - IMPORTANT: Explicitly discuss how this abstraction interacts with EVERY other related abstraction. When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
 
-- Cover ALL aspects of the abstraction, including edge cases and advanced usage patterns. Include sections on:
-  * Core functionality and purpose
-  * Initialization and configuration
-  * Error handling and edge cases
-  * Performance considerations
-  * Integration with other abstractions
-  * Any architectural patterns it implements
+- Cover ALL aspects of the abstraction, including edge cases and advanced usage patterns. Include technical sections on:
+  * Core functionality and internal mechanisms (not just API surface)
+  * Initialization and configuration with deep technical details
+  * Error handling strategies and failure modes
+  * Performance characteristics and optimization techniques
+  * Integration patterns with other system components
+  * Architectural patterns it implements (with detailed explanation of pattern implementation)
+  * Known limitations or constraints and their technical reasons
+
+- Include a technical best practices section that:
+  * Identifies common pitfalls when using this abstraction
+  * Provides optimized usage patterns for different scenarios
+  * Discusses scaling considerations
+  * Addresses any version-specific considerations or compatibility issues
 
 - Use mermaid diagrams to illustrate complex concepts with PROPER mermaid syntax. ALWAYS begin with the diagram type (e.g., `sequenceDiagram`, `flowchart LR`, `classDiagram`, etc.) and use the correct syntax for that diagram type. For sequence diagrams, use proper arrow syntax like `->>`, `-->>`, `-->`, etc. NOT just `->`. For flowcharts, use proper node and connection syntax. Example with correct syntax: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n``` {mermaid_lang_note}.
 
-- Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand.
+- TECHNOLOGY AGNOSTICISM: Present all explanations in a way that emphasizes fundamental computer science principles that apply across languages and frameworks. When discussing implementations:
+  * Focus on abstract patterns rather than specific syntax
+  * Discuss the underlying algorithms and data structures
+  * Explain architectural decisions in technology-neutral terms
+  * Present multiple implementation approaches across different paradigms (OOP, functional, etc.)
+  * Highlight universal principles that transcend specific technology stacks
 
-- End the chapter with a brief conclusion that summarizes what was learned{instruction_lang_note} and provides a transition to the next chapter{instruction_lang_note}. If there is a next chapter, use a proper Markdown link: [Next Chapter Title](next_chapter_filename){link_lang_note}.
+- Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand, but ALWAYS follow analogies with detailed technical specifics.
 
-- Ensure the tone is welcoming and easy for a seasoned sofware developer professional to understand{tone_note}.
+- End the chapter with a technical conclusion that:
+  * Summarizes the key technical insights about the abstraction
+  * Highlights architectural patterns and principles demonstrated
+  * Connects this abstraction to broader system architecture
+  * Provides a transition to the next chapter{instruction_lang_note}. If there is a next chapter, use a proper Markdown link: [Next Chapter Title](next_chapter_filename){link_lang_note}.
+
+- Ensure the tone is welcoming yet technically precise and substantive{tone_note}.
 
 - IMPORTANT: DO NOT include any content related to unit tests, end-to-end (e2e) tests, integration tests, or any other types of testing in the tutorial. Skip all testing-related code and explanations. Focus exclusively on explaining the abstractions, concepts, and how to use them without any test coverage discussions.
 

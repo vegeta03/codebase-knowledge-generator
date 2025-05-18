@@ -3,7 +3,7 @@ import re
 import json5
 from pocketflow import Node, BatchNode
 from utils.crawl_github_files import crawl_github_files
-from utils.call_llm import call_llm, repair_llm_json
+from utils.call_llm import call_llm
 from utils.crawl_local_files import crawl_local_files
 from utils.code_chunking import chunk_codebase
 from utils.chunk_processor import process_code_for_llm, batch_process_chunks, estimate_model_calls
@@ -103,25 +103,8 @@ class IdentifyAbstractions(Node):
             [f"- {idx} # {path}" for idx, path in file_info]
         )
         
-        # Add language instruction and hints only if not English
-        language_instruction = ""
-        name_lang_hint = ""
-        desc_lang_hint = ""
-        if language.lower() != "english":
-            language_instruction = f"IMPORTANT: Generate the `name` and `description` for each abstraction in **{language.capitalize()}** language. Do NOT use English for these fields.\n\n"
-            # Keep specific hints here as name/description are primary targets
-            name_lang_hint = f" (value in {language.capitalize()})"
-            desc_lang_hint = f" (value in {language.capitalize()})"
-        
-        # Use the prompt template from prompts.py
-        prompt_template = get_identify_abstractions_prompt(
-            project_name=project_name,
-            context="{code}",  # Placeholder for code content that will be replaced
-            file_listing_for_prompt=file_listing_for_prompt,
-            language_instruction=language_instruction,
-            name_lang_hint=name_lang_hint,
-            desc_lang_hint=desc_lang_hint
-        )
+        # Create a prompt template for identifying abstractions
+        prompt_template = self._create_prompt_template(project_name, language, file_listing_for_prompt)
         
         # Estimate model usage for logging purposes
         estimation = estimate_model_calls(file_paths, file_contents)
@@ -238,19 +221,29 @@ class IdentifyAbstractions(Node):
         # Last resort: return the cleaned response
         return response.strip()
 
-    def _fix_malformed_json(self, json_str: str) -> str:
-        """
-        Fix common JSON syntax errors that might appear in LLM responses.
-        This is a basic fix function that delegates to the more comprehensive repair_llm_json.
+    def _create_prompt_template(self, project_name, language, file_listing_for_prompt):
+        """Create a prompt template for identifying abstractions."""
+        # Add language instruction and hints only if not English
+        language_instruction = ""
+        name_lang_hint = ""
+        desc_lang_hint = ""
+        if language.lower() != "english":
+            language_instruction = f"IMPORTANT: Generate the `name` and `description` for each abstraction in **{language.capitalize()}** language. Do NOT use English for these fields.\n\n"
+            # Keep specific hints here as name/description are primary targets
+            name_lang_hint = f" (value in {language.capitalize()})"
+            desc_lang_hint = f" (value in {language.capitalize()})"
         
-        Args:
-            json_str: The potentially malformed JSON string
-            
-        Returns:
-            Fixed JSON string that should be parseable
-        """
-        # Use the comprehensive repair function from call_llm module
-        return repair_llm_json(json_str)
+        # Get the prompt template from prompts.py with {code} placeholder for AST-aware chunked code
+        prompt_template = get_identify_abstractions_prompt(
+            project_name=project_name,
+            context="{code}",  # Placeholder for code content that will be replaced
+            file_listing_for_prompt=file_listing_for_prompt,
+            language_instruction=language_instruction,
+            name_lang_hint=name_lang_hint,
+            desc_lang_hint=desc_lang_hint
+        )
+        
+        return prompt_template
 
     def exec(self, prep_res):
         (
@@ -293,105 +286,9 @@ class IdentifyAbstractions(Node):
                 try:
                     # Extract JSON from the response using our helper function
                     abstractions_json = self._extract_json_from_response(result)
-                    
-                    # Fix common JSON syntax errors in the LLM response
-                    abstractions_json = self._fix_malformed_json(abstractions_json)
-                    
-                    # Parse the JSON with increasing levels of fallback strategies
-                    try:
-                        # Attempt 1: Parse with json5 (most lenient)
-                        chunk_abstractions = json5.loads(abstractions_json)
-                    except Exception as json5_error:
-                        print(f"Failed to parse with json5: {json5_error}")
                         
-                        try:
-                            # Attempt 2: Try standard json parser (sometimes works better for certain errors)
-                            import json
-                            chunk_abstractions = json.loads(abstractions_json)
-                            print("Successfully parsed with standard json parser")
-                        except Exception as json_error:
-                            print(f"Failed with standard json parser: {json_error}")
-                            
-                            # Attempt 3: More aggressive JSON repair
-                            print("Attempting more aggressive JSON repair...")
-                            # Print first 100 chars of the problematic JSON for debugging
-                            print(f"Problematic JSON (first 100 chars): {abstractions_json[:100]}...")
-                            
-                            # Try to salvage the JSON by manually reconstructing it
-                            chunk_abstractions = []
-                            
-                            # Attempt to extract objects with a multiline pattern
-                            pattern = r'\{\s*"name"\s*:\s*"([^"]*)"\s*,\s*"description"\s*:\s*"([^"]*)"\s*,\s*"file_indices"\s*:\s*\[(.*?)\]\s*\}'
-                            matches = re.findall(pattern, abstractions_json, re.DOTALL)
-                            
-                            if not matches:
-                                # Try a more liberal pattern if the first one fails
-                                pattern = r'\{\s*"name"\s*:\s*"([^"]*)"\s*,?\s*"description"\s*:\s*"([^"]*)"\s*,?\s*"file_indices"\s*:\s*\[(.*?)\]\s*\}'
-                                matches = re.findall(pattern, abstractions_json, re.DOTALL)
-                            
-                            if not matches:
-                                # Even more liberal pattern as last resort
-                                pattern = r'"name"\s*:\s*"([^"]*)".*?"description"\s*:\s*"([^"]*)".*?"file_indices"\s*:\s*\[(.*?)\]'
-                                matches = re.findall(pattern, abstractions_json, re.DOTALL)
-                            
-                            for match in matches:
-                                name, description, indices_str = match
-                                # Parse the indices
-                                indices = []
-                                # Look for any quoted strings in the indices part
-                                for idx in re.findall(r'"([^"]*)"', indices_str):
-                                    indices.append(idx)
-                                
-                                # If we didn't find any quoted indices, try to extract numbers directly
-                                if not indices:
-                                    for idx in re.findall(r'\d+', indices_str):
-                                        indices.append(idx)
-                                
-                                chunk_abstractions.append({
-                                    "name": name,
-                                    "description": description,
-                                    "file_indices": indices
-                                })
-                            
-                            if not chunk_abstractions:
-                                # Last desperate attempt - parse line by line looking for key patterns
-                                lines = abstractions_json.split('\n')
-                                current_obj = {}
-                                file_indices = []
-                                
-                                for line in lines:
-                                    if '"name"' in line:
-                                        # Start a new object if we encounter a name
-                                        current_obj = {"file_indices": []}
-                                        name_match = re.search(r'"name"\s*:\s*"([^"]*)"', line)
-                                        if name_match:
-                                            current_obj["name"] = name_match.group(1)
-                                    
-                                    elif '"description"' in line:
-                                        desc_match = re.search(r'"description"\s*:\s*"([^"]*)"', line)
-                                        if desc_match:
-                                            current_obj["description"] = desc_match.group(1)
-                                    
-                                    elif '"file_indices"' in line:
-                                        # Start collecting file indices
-                                        file_indices = []
-                                    
-                                    elif '#' in line and any(char.isdigit() for char in line):
-                                        # This looks like a file index entry
-                                        idx_match = re.search(r'"(\d+\s*#[^"]*)"', line)
-                                        if idx_match and "file_indices" in current_obj:
-                                            current_obj["file_indices"].append(idx_match.group(1))
-                                    
-                                    elif '}' in line and all(k in current_obj for k in ["name", "description"]):
-                                        # End of object, add it if it has required fields
-                                        if current_obj and "name" in current_obj and "description" in current_obj:
-                                            chunk_abstractions.append(current_obj)
-                                            current_obj = {}
-                            
-                            if chunk_abstractions:
-                                print(f"Successfully salvaged {len(chunk_abstractions)} abstractions with aggressive repair")
-                            else:
-                                raise Exception("Unable to salvage JSON even with aggressive repair")
+                    # Parse the JSON
+                    chunk_abstractions = json5.loads(abstractions_json)
                     
                     # Log the number of abstractions found in this chunk
                     abstraction_count = len(chunk_abstractions)
@@ -419,15 +316,13 @@ class IdentifyAbstractions(Node):
                         # Create a composite key that's still name-focused but considers context
                         norm_name = abstraction_name.lower()
                         
-                        # Initialize file_overlap_ratio to 0 for all cases
-                        file_overlap_ratio = 0
-                        
                         # Check if we have an exact name match
                         if norm_name in abstraction_tracker:
                             existing = abstraction_tracker[norm_name]
                             existing_file_set = set([str(idx) for idx in existing["file_indices"]])
                             
                             # Calculate overlap between file indices
+                            file_overlap_ratio = 0
                             if existing_file_set and file_indices_set:
                                 intersection = existing_file_set.intersection(file_indices_set)
                                 union = existing_file_set.union(file_indices_set)
@@ -438,25 +333,36 @@ class IdentifyAbstractions(Node):
                             if file_overlap_ratio > 0.3:  # Require at least 30% overlap to merge
                                 # Merge this as a duplicate
                                 print(f"  Duplicate found: \"{abstraction['name']}\" merging with existing abstraction (file overlap: {file_overlap_ratio:.2f})")
-                                
-                                # Merge file indices (avoid duplicates)
-                                old_indices = set(existing["file_indices"])
-                                new_indices = set(abstraction["file_indices"])
-                                combined_indices = old_indices.union(new_indices)
-                                
-                                if len(combined_indices) > len(old_indices):
-                                    print(f"    Added {len(combined_indices) - len(old_indices)} new file indices")
-                                
-                                existing["file_indices"] = list(combined_indices)
-                                
-                                # Take the longer description
-                                if len(abstraction["description"]) > len(existing["description"]):
-                                    existing["description"] = abstraction["description"]
-                                    print(f"    Updated with longer description")
-                                continue
-                        
-                        # Different enough to be a distinct abstraction, or no existing one with this name
-                        abstraction_tracker[norm_name] = abstraction
+                            
+                            # Merge file indices (avoid duplicates)
+                            old_indices = set(existing["file_indices"])
+                            new_indices = set(abstraction["file_indices"])
+                            combined_indices = old_indices.union(new_indices)
+                            
+                            if len(combined_indices) > len(old_indices):
+                                print(f"    Added {len(combined_indices) - len(old_indices)} new file indices")
+                            
+                            existing["file_indices"] = list(combined_indices)
+                            
+                            # Take the longer description
+                            if len(abstraction["description"]) > len(existing["description"]):
+                                existing["description"] = abstraction["description"]
+                                print(f"    Updated with longer description")
+                        else:
+                            # Different enough to be a distinct abstraction 
+                            # Add a suffix to make the name unique
+                            variant_count = 1
+                            variant_name = f"{abstraction_name} (Variant {variant_count})"
+                            variant_norm = variant_name.lower()
+                            
+                            while variant_norm in abstraction_tracker:
+                                variant_count += 1
+                                variant_name = f"{abstraction_name} (Variant {variant_count})"
+                                variant_norm = variant_name.lower()
+                            
+                            abstraction["name"] = variant_name
+                            print(f"  Similar but distinct abstraction: \"{abstraction['name']}\" (file overlap: {file_overlap_ratio:.2f})")
+                            abstraction_tracker[variant_norm] = abstraction
                 except Exception as e:
                     print(f"Warning: Failed to parse abstractions from chunk {chunk_id}: {e}")
                     # Log the problematic response for debugging

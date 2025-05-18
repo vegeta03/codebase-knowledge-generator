@@ -163,7 +163,9 @@ def estimate_model_calls(file_paths: List[str],
 def batch_process_chunks(prepared_prompts: List[Dict[str, Any]], 
                         call_llm_func,
                         max_concurrent: int = 3,
-                        use_cache: bool = False) -> List[Dict[str, Any]]:
+                        use_cache: bool = False,
+                        max_retries: int = 3,
+                        retry_delay: int = 5) -> List[Dict[str, Any]]:
     """
     Process chunks in batches, calling the LLM function for each.
     
@@ -172,16 +174,21 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
         call_llm_func: Function to call with each prompt
         max_concurrent: Maximum number of concurrent LLM calls
         use_cache: Whether to use caching with the LLM calls
+        max_retries: Maximum number of retry attempts for failed calls
+        retry_delay: Delay in seconds between retry attempts
         
     Returns:
         List of results with prompt and response
     """
+    import time
+    import random
+    
     # This function would orchestrate batch processing
     # For now, just process sequentially
     results = []
     
     logger.info(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
-               f" (using cache: {use_cache})")
+               f" (using cache: {use_cache}, max_retries: {max_retries})")
     
     # Track token usage
     total_prompt_tokens = 0
@@ -199,44 +206,80 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
         if isinstance(estimated_tokens, (int, float)):
             total_prompt_tokens += estimated_tokens
         
-        try:
-            # Call the LLM with the prepared prompt
-            logger.info(f"Sending chunk {chunk_id} to LLM...")
-            response = call_llm_func(prompt_data["prompt"], use_cache=use_cache)
+        # Initialize retry counter
+        retry_count = 0
+        success = False
+        last_error = None
+        
+        # Implement retry loop
+        while retry_count <= max_retries and not success:
+            if retry_count > 0:
+                # Add jitter to retry delay to prevent thundering herd
+                jitter_factor = 1 + (random.random() * 0.5)  # 1.0-1.5x multiplier
+                sleep_time = retry_delay * jitter_factor
+                logger.info(f"Retry attempt {retry_count}/{max_retries} for chunk {chunk_id} after {sleep_time:.2f}s delay")
+                time.sleep(sleep_time)
             
-            # Calculate approximate response length (rough estimate)
-            response_length = len(response)
-            estimated_response_tokens = response_length // 4  # rough estimate
-            
-            # Store the result
-            results.append({
-                "chunk_id": chunk_id,
-                "files": prompt_data["files"],
-                "token_count": prompt_data.get("token_count", "unknown"),
-                "estimated_tokens": estimated_tokens,
-                "token_utilization": token_utilization,
-                "estimated_response_tokens": estimated_response_tokens,
-                "response": response
-            })
-            
-            logger.info(f"Successfully processed chunk {chunk_id}. " +
-                       f"Response length: ~{response_length} chars, " +
-                       f"~{estimated_response_tokens} tokens")
-            successful_chunks += 1
-            
-        except Exception as e:
-            logger.error(f"Error processing chunk {chunk_id}: {e}")
-            failed_chunks += 1
-            
-            # Add a failure entry
-            results.append({
-                "chunk_id": chunk_id,
-                "files": prompt_data["files"],
-                "token_count": prompt_data.get("token_count", "unknown"),
-                "estimated_tokens": estimated_tokens,
-                "token_utilization": token_utilization,
-                "error": str(e)
-            })
+            try:
+                # Call the LLM with the prepared prompt
+                logger.info(f"Sending chunk {chunk_id} to LLM...")
+                response = call_llm_func(prompt_data["prompt"], use_cache=use_cache)
+                
+                # Calculate approximate response length (rough estimate)
+                response_length = len(response)
+                estimated_response_tokens = response_length // 4  # rough estimate
+                
+                # Store the result
+                results.append({
+                    "chunk_id": chunk_id,
+                    "files": prompt_data["files"],
+                    "token_count": prompt_data.get("token_count", "unknown"),
+                    "estimated_tokens": estimated_tokens,
+                    "token_utilization": token_utilization,
+                    "estimated_response_tokens": estimated_response_tokens,
+                    "response": response
+                })
+                
+                logger.info(f"Successfully processed chunk {chunk_id}. " +
+                           f"Response length: ~{response_length} chars, " +
+                           f"~{estimated_response_tokens} tokens")
+                successful_chunks += 1
+                success = True
+                break
+                
+            except Exception as e:
+                last_error = e
+                # Check if this is a connection error that's worth retrying
+                error_msg = str(e).lower()
+                connection_keywords = [
+                    "connection", "timeout", "peer closed", "reset", 
+                    "eof", "broken pipe", "socket", "network", "incomplete"
+                ]
+                
+                is_connection_error = any(keyword in error_msg for keyword in connection_keywords)
+                
+                if is_connection_error and retry_count < max_retries:
+                    logger.warning(f"Connection error processing chunk {chunk_id} (attempt {retry_count+1}/{max_retries+1}): {e}")
+                    retry_count += 1
+                else:
+                    # Either not a connection error or max retries reached
+                    if retry_count > 0:
+                        logger.error(f"Failed to process chunk {chunk_id} after {retry_count} retries: {e}")
+                    else:
+                        logger.error(f"Error processing chunk {chunk_id}: {e}")
+                    failed_chunks += 1
+                    
+                    # Add a failure entry
+                    results.append({
+                        "chunk_id": chunk_id,
+                        "files": prompt_data["files"],
+                        "token_count": prompt_data.get("token_count", "unknown"),
+                        "estimated_tokens": estimated_tokens,
+                        "token_utilization": token_utilization,
+                        "error": str(e),
+                        "retries": retry_count
+                    })
+                    break
     
     # Log summary statistics
     logger.info(f"Batch processing complete: {successful_chunks} successful, {failed_chunks} failed")
