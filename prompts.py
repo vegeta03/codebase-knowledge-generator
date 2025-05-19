@@ -31,24 +31,39 @@ def get_identify_abstractions_prompt(
     return f"""
 For the project `{project_name}`:
 
-Codebase Context:
+Codebase Context (a portion of the overall codebase):
 {context}
 
-{language_instruction}Analyze the codebase context.
-Identify ALL distinct functional abstractions in this codebase to help those new to the codebase. Being exhaustive is critical - missing abstractions is worse than including minor ones.
+{language_instruction}Based on the provided Codebase Context, your primary task is to **DYNAMICALLY IDENTIFY** the specific programming languages, frameworks, libraries, architectural patterns (e.g., microservices, event-driven, layered), and core Computer Science principles (e.g., specific algorithms, data structures, concurrency models) evident in this portion of the code. Then, using this identified technological context, identify ALL distinct and significant abstractions.
 
-NOTE: You are seeing only a portion of the codebase in this chunk. Identify ANY abstraction you can recognize, even if it seems incomplete. The goal is to capture ALL possible abstractions at multiple levels of granularity - from high-level architectural patterns down to significant utility functions, classes, or modules.
+Abstractions can include (but are not limited to):
+- Key architectural components (e.g., services, controllers, repositories, domain entities if an ORM or DDD is identified).
+- Instantiations of common design patterns (e.g., Factory, Singleton, Observer, Strategy - explain how the pattern is specifically implemented with the identified language/framework features).
+- Core algorithms or complex business logic units.
+- Significant data structures and their management.
+- Primary modules, classes, or interfaces that play a crucial role.
+- Critical operational flows or processing pipelines.
+- Important utility classes or functions that are widely used or encapsulate complex logic.
 
-For each abstraction, provide:
-1. A concise `name`{name_lang_hint}.
-2. A "highly-technical" and "computer science" centric `description` explaining what it is with a real-world and practical analogy, in at least 300 words{desc_lang_hint}. Include all aspects of the abstraction, including edge cases and advanced usage patterns.
-3. A list of relevant `file_indices` (integers) using the format `idx # path/comment`.
+NOTE: You are seeing only a portion of the codebase in this chunk. Identify ANY abstraction you can recognize based on the provided context, even if it seems incomplete from a global perspective. The goal is to capture ALL possible abstractions at multiple levels of granularity. Being exhaustive is critical - missing abstractions is worse than including minor ones, as long as they are technically significant.
+
+For each identified abstraction, provide:
+1.  A concise `name`{name_lang_hint}. This name should be descriptive of its function within the identified technological context.
+2.  A "highly-technical" and "Computer Science" centric `description`{desc_lang_hint}. This description MUST BE LOSSLESS and aim for a recreate-level understanding. It should be at least 300 words and comprehensively explain:
+    *   What the abstraction is and its primary purpose/responsibilities *within this specific codebase and its identified technology stack*.
+    *   The problem it solves or the functionality it provides, explained *in terms of the identified languages, frameworks, or libraries being used*.
+    *   Core internal mechanisms: How it works, detailing *how specific features of the identified technology stack (e.g., language constructs, framework APIs, library functions) are leveraged* to achieve its behavior.
+    *   Key inputs it processes, outputs it generates, and significant side effects it might have, explained with data types or structures common in the *identified language/framework*.
+    *   High-level interactions with other potential abstractions or system components, describing the *nature of these interactions (e.g., method calls, event emissions using an identified event system, data sharing via an identified state management approach)*.
+    *   Underlying CS principles (e.g., if it's a caching mechanism, mention hash tables and O(1) lookups, and how the *identified language's dictionary/map or a specific caching library* implements this).
+    *   If it employs a known design pattern, name the pattern and detail *how it is implemented using the specific constructs of the identified language or framework*.
+    *   A brief real-world analogy, BUT this analogy MUST be immediately and thoroughly mapped back to the technical specifics of the abstraction *as it is realized using the identified technologies*. Each part of the analogy must correspond to a concrete technical aspect.
+3.  A list of relevant `file_indices` (integers) using the format `idx # path/comment`, referring to the files listed below that contribute to this abstraction.
 
 IMPORTANT GUIDANCE:
-- Identify abstractions at ALL levels of granularity - architectural patterns, design patterns, services, components, significant classes, utility functions, etc.
-- For any framework or technology stack, identify both technology-specific abstractions (e.g., services, components) and application-specific implementations
-- Common abstraction categories to consider: Data models, Services/APIs, UI components, State management, Configuration, Utilities, Core logic, Domain entities, Controllers, Routing mechanisms, Authentication/Security, Event handling, etc.
-- Do not limit yourself to a specific number of abstractions - identify ALL that you can find
+- Identify abstractions at ALL levels of granularity – from high-level architectural patterns (e.g., "Message Queue Consumer Service if a message queue library is identified") down to significant utility functions, classes, or modules, as long as they are central to the codebase portion provided.
+- For any identified framework or technology stack, identify both technology-specific abstractions (e.g., "Angular Component", "Spring Boot Service", "Rust Tokio Task Executor") and application-specific implementations built upon them.
+- Consider common abstraction categories: Data models/entities (and how they are defined/managed by an identified ORM or language feature), Services/APIs, UI components (if UI framework identified), State management (if state library identified), Configuration handlers, Core business logic modules, Domain entities, Controllers/Routers (as per identified framework), Authentication/Security mechanisms, Event handling/processing systems (if identified).
 
 CRITICAL INSTRUCTION: Your primary task is to identify MAXIMUM number of core abstractions of the application. You MUST NOT identify any form of software testing (including but not limited to unit tests, integration tests, end-to-end (E2E) tests, performance tests, etc.), testing frameworks, test runners, test utilities, or any code, files, or concepts primarily related to testing as an abstraction. If you encounter testing-related elements, ignore them for the purpose of abstraction identification. Focus exclusively on the application's runtime behavior, business logic, and core architectural components.
 
@@ -56,34 +71,34 @@ List of file indices and paths present in the context:
 {file_listing_for_prompt}
 
 RESPONSE FORMAT REQUIREMENTS:
-1. Output ONLY a JSON5 list of dictionaries with NO explanatory text before or after
-2. Do NOT include any explanation, discussion, or notes about the JSON structure
-3. Do NOT describe what you're going to do - just provide the JSON5 directly
-4. Your entire response must be parseable as valid JSON5
-5. Start your response with the opening bracket "[" and end with the closing bracket "]"
-6. Each dictionary must contain exactly these three keys: "name", "description", and "file_indices"
-7. Use double curly braces {{ }} for the dictionary objects
-8. Remember to escape all internal curly braces properly, especially in the description text
+1. Output ONLY a JSON5 list of dictionaries with NO explanatory text before or after.
+2. Do NOT include any explanation, discussion, or notes about the JSON structure.
+3. Do NOT describe what you're going to do - just provide the JSON5 directly.
+4. Your entire response must be parseable as valid JSON5.
+5. Start your response with the opening bracket "[" and end with the closing bracket "]".
+6. Each dictionary must contain exactly these three keys: "name", "description", and "file_indices".
+7. Use double curly braces {{{{ }}}} for the dictionary objects.
+8. Remember to escape all internal curly braces properly, especially in the description text.
 
 Here is the exact format to follow. Begin your response immediately with this JSON5 structure:
 
 [
   {{
-    "name": "Query Processing{name_lang_hint}",
-    "description": "Explains what the abstraction does in detail, covering all aspects and edge cases. Include implementation details, usage patterns, and relationships with other abstractions. It's like a central dispatcher routing requests. Consider providing details about initialization, configuration, error handling, and performance aspects. Explain how it fits into the overall architecture.{desc_lang_hint}",
+    "name": "[Example] Asynchronous Task Processor (using Identified Library X){name_lang_hint}",
+    "description": "This abstraction is responsible for managing and executing background tasks asynchronously. It leverages [Identified Library X, e.g., Celery for Python, Tokio for Rust] to achieve non-blocking operations. Its core mechanism involves a task queue (potentially identified as RabbitMQ or Redis if context allows) where tasks are enqueued. Worker processes, managed by [Identified Library X], pick up these tasks and execute them. For instance, if the codebase uses Python with Celery, this abstraction would encapsulate Celery app configuration, task definitions (decorated with `@celery.task`), and potentially custom routing logic. It solves the problem of long-running operations blocking the main application thread, crucial for [identified application type, e.g., web servers needing responsive UIs]. Internally, it might use [identified language features like Python's `async/await` if Celery tasks are async] or manage a pool of worker processes/threads as configured by Celery. Inputs are typically serialized task parameters, and outputs could be results stored in a backend (e.g., database via an identified ORM) or notifications sent via an identified event system. This is analogous to a restaurant kitchen's order system where waiters (main threads) take orders and pass them to specialized cooks (worker processes) who prepare dishes (tasks) without making the waiter stand by, thus allowing the waiter to serve more customers (handle more requests). The 'order ticket' is like the serialized task, 'specialized cooks' are like Celery workers, and the 'pass-through window' for orders is like the message queue.{desc_lang_hint}",
     "file_indices": [
-      "0 # path/to/file1.py",
-      "3 # path/to/related.py"
+      "0 # path/to/task_definitions.py",
+      "3 # path/to/celery_config.py"
     ]
   }},
   {{
-    "name": "Query Optimization{name_lang_hint}",
-    "description": "Another core concept, similar to a blueprint for objects. Provide comprehensive details about its purpose, internal mechanisms, configuration options, and how other components interact with it.{desc_lang_hint}",
+    "name": "[Example] Configuration Management Service (leveraging Identified Framework Y feature){name_lang_hint}",
+    "description": "This service provides a centralized way to access application configuration. It likely uses [Identified Framework Y's configuration module, e.g., Spring Boot's `@ConfigurationProperties`, NestJS's `ConfigService`]. It reads configuration from various sources (e.g., environment variables, .properties/.yaml files - identify which if possible from context) and makes them available application-wide, often through dependency injection provided by [Identified Framework Y]. This solves the problem of scattered configuration settings and provides a consistent interface for all modules to retrieve parameters like database URLs, API keys, feature flags, etc. It might implement features like type validation for configuration values or dynamic reloading if supported by the [Identified Framework Y feature]. This is like a central control panel for a complex machine, where all settings are managed in one place and can be easily adjusted or queried by different parts of the machine.{desc_lang_hint}",
     "file_indices": [
-      "5 # path/to/another.js"
+      "5 # path/to/config_service.java"
     ]
   }}
-  // ... include ALL distinct functional abstractions
+  // ... include ALL distinct functional abstractions based on the DYNAMICALLY IDENTIFIED technology stack and codebase context
 ]"""
 
 
@@ -102,7 +117,7 @@ def get_analyze_relationships_prompt(
     Args:
         project_name: Name of the project
         abstraction_listing: Formatted list of abstraction indices and names
-        context: The abstraction details and code snippets
+        context: The abstraction details and code snippets (potentially including identified tech stack info for each abstraction)
         num_abstractions: Number of abstractions
         language_instruction: Optional instruction for non-English output
         lang_hint: Optional language hint for summary and labels
@@ -112,64 +127,74 @@ def get_analyze_relationships_prompt(
         Formatted prompt string
     """
     return f"""
-Based on the following abstractions and relevant code snippets from the project `{project_name}`:
+Based on the following abstractions (which may include details about their DYNAMICALLY IDENTIFIED technology stack and implementation) and relevant code snippets from the project `{project_name}`:
 
 List of Abstraction Indices and Names{list_lang_note}:
 {abstraction_listing}
 
-Context (Abstractions, Descriptions, Code):
+Context (Abstractions, their detailed descriptions including identified technologies, and potentially related Code Snippets):
 {context}
 
-{language_instruction}Please provide:
-1. A high-level `summary` of the project's main purpose and functionality in a short "technical" and "computer science" friendly sentences{lang_hint}. Use markdown formatting with **bold** and *italic* text to highlight important concepts.
-2. A comprehensive list (`relationships`) describing ALL significant interactions between these abstractions. For each relationship, specify:
-    - `from_abstraction`: Index of the source abstraction (e.g., `0 # AbstractionName1`)
-    - `to_abstraction`: Index of the target abstraction (e.g., `1 # AbstractionName2`)
-    - `label`: A brief, descriptive label for the interaction **in just a few words**{lang_hint}.
+{language_instruction}Your task is to analyze these abstractions and their context to describe their interrelationships.
 
-    Consider a WIDE VARIETY of technology-agnostic relationship types, such as:
-    - Structural: "Is part of", "Contains", "Composes", "Is a component of"
-    - Dependency: "Depends on", "Requires", "Is configured by", "Uses services from", "Consumes events from", "Produces events for"
-    - Data Flow: "Manages data for", "Produces data for", "Consumes data from", "Provides data to"
-    - Conceptual/Logical: "Specializes", "Implements", "Facilitates", "Orchestrates", "Coordinates with", "Is conceptually linked to"
-    - Invocation/Control Flow: "Invokes", "Calls", "Triggers", "Controls"
+Please provide:
+1.  A high-level `summary` of the project's main purpose and functionality. This summary should be technically precise, highlight key architectural choices evident from the abstractions (e.g., "This project appears to be an [identified architecture, e.g., event-driven microservice system] built using [identified primary language/framework, e.g., Java with Spring Boot]..."), and use markdown formatting with **bold** and *italic* text to emphasize important DYNAMICALLY IDENTIFIED concepts or technologies{lang_hint}.
+2.  A comprehensive list (`relationships`) describing ALL significant interactions between these abstractions. For each relationship, specify:
+    *   `from_abstraction`: Index and name of the source abstraction (e.g., `0 # AbstractionName1`).
+    *   `to_abstraction`: Index and name of the target abstraction (e.g., `1 # AbstractionName2`).
+    *   `label`: A brief, descriptive label for the interaction{lang_hint}. This label MUST be highly specific and describe the *mechanism* of interaction, ideally referencing the DYNAMICALLY IDENTIFIED technologies involved. Examples:
+        *   "Invokes via REST API call (using identified HTTP client, e.g., Axios, OkHttp)"
+        *   "Sends message to (via identified Message Queue, e.g., RabbitMQ, Kafka topic)"
+        *   "Depends on for data persistence (through identified ORM, e.g., SQLAlchemy, Hibernate)"
+        *   "Consumes events from (using identified event bus/library, e.g., RxJS, Akka Streams)"
+        *   "Extends functionality of (via identified inheritance/composition in language X)"
+        *   "Manages lifecycle of (using identified framework Y's component model)"
+        *   "Provides configuration to (through identified DI mechanism of framework Z)"
+        *   "Composes UI with (as an identified UI component in framework A)"
 
-    The relationship should ideally be backed by evidence in the provided code context or be a clear architectural or logical link between the abstractions.
-    Be thorough in identifying ALL meaningful relationships, ensuring complete coverage of how abstractions interact.
+    Consider a WIDE VARIETY of technology-agnostic relationship types, but ALWAYS specify them *in terms of the DYNAMICALLY IDENTIFIED technology stack* if possible:
+    - Structural: "Is part of (e.g., as a module in an identified build system)", "Contains (e.g., an identified data structure)", "Composes (e.g., using identified component model)"
+    - Dependency: "Requires (e.g., an identified library/module)", "Is configured by (e.g., an identified configuration file format or service)", "Uses services from (e.g., an identified internal API)"
+    - Data Flow: "Produces data for (e.g., an identified data pipeline stage)", "Consumes data from (e.g., an identified database table via an ORM)"
+    - Conceptual/Logical: "Specializes (e.g., an identified base class/interface)", "Implements (e.g., an identified API specification)", "Orchestrates (e.g., a series of calls to identified services)"
+    - Invocation/Control Flow: "Invokes (e.g., a method from an identified class/module)", "Triggers (e.g., an event in an identified event system)"
+
+    The relationship should ideally be backed by evidence in the provided code context or be a clear architectural or logical link between the abstractions, explained via their *identified technological roles and interactions*.
+    Be thorough in identifying ALL meaningful relationships, ensuring complete coverage of how abstractions interact *using their DYNAMICALLY IDENTIFIED implementation details*.
 
 IMPORTANT INSTRUCTIONS:
-1. CRITICAL: EVERY abstraction listed MUST be involved in at least ONE meaningful relationship (either as a source or a target). Do NOT leave any abstraction isolated. If a direct interaction is not obvious, infer logical or conceptual connections based on their descriptions and roles in the system.
+1. CRITICAL: EVERY abstraction listed MUST be involved in at least ONE meaningful relationship (either as a source or a target). Do NOT leave any abstraction isolated. If a direct interaction is not obvious from the immediate code, infer logical or conceptual connections based on their descriptions, their likely roles in the *identified architecture*, and common patterns in the *identified technology stack*.
 2. Each abstraction index (from 0 to {num_abstractions-1}) MUST appear at least once across all `from_abstraction` or `to_abstraction` fields.
-3. Use ONLY the abstraction indices (0 to {num_abstractions-1}) from the list above. DO NOT use file indices or project names directly in the `from_abstraction` or `to_abstraction` fields.
-4. The indices in `from_abstraction` and `to_abstraction` must be integers between 0 and {num_abstractions-1} inclusive, referencing the abstraction list.
-5. Exclude any relationships that are solely testing-related. Do not focus on test frameworks, testing utilities, or test implementations when analyzing relationships.
-6. Be COMPREHENSIVE and aim for completeness. It is better to include a less obvious but plausible conceptual relationship than to leave an abstraction disconnected.
+3. Use ONLY the abstraction indices and names (e.g., `0 # AbstractionName1`) from the list above for `from_abstraction` and `to_abstraction` fields. DO NOT use file indices or generic project names.
+4. The indices in `from_abstraction` and `to_abstraction` must reference the abstraction list (0 to {num_abstractions-1}).
+5. Exclude any relationships that are solely testing-related. Focus on the application's runtime architecture and logic.
+6. Be COMPREHENSIVE. It's better to include a plausible conceptual relationship (explained via the identified tech) than to leave an abstraction disconnected.
 
 RESPONSE FORMAT REQUIREMENTS:
-1. Output ONLY a JSON5 object with NO explanatory text before or after
-2. Do NOT include any explanation, discussion, or notes about the JSON structure
-3. Do NOT describe what you're going to do - just provide the JSON5 directly
-4. Your entire response must be parseable as valid JSON5
-5. Start your response with the opening curly brace "{{" and end with the closing curly brace "}}"
-6. The JSON5 object must contain exactly these two keys: "summary" and "relationships"
-7. The "relationships" value must be an array of objects, each with "from_abstraction", "to_abstraction", and "label" keys
+1. Output ONLY a JSON5 object with NO explanatory text before or after.
+2. Do NOT include any explanation, discussion, or notes about the JSON structure.
+3. Do NOT describe what you're going to do - just provide the JSON5 directly.
+4. Your entire response must be parseable as valid JSON5.
+5. Start your response with the opening curly brace "{{" and end with the closing curly brace "}}".
+6. The JSON5 object must contain exactly these two keys: "summary" and "relationships".
+7. The "relationships" value must be an array of objects, each with "from_abstraction", "to_abstraction", and "label" keys.
 
 Here is the exact format to follow. Begin your response immediately with this JSON5 structure:
 
 {{
-  "summary": "A brief, simple explanation of the project{lang_hint}. Can span multiple lines with **bold** and *italic* for emphasis. IMPORTANT: This must be a single string value, not multiple strings.",
+  "summary": "This project appears to be a [DYNAMICALLY IDENTIFIED architecture, e.g., **serverless data processing pipeline**] implemented in [DYNAMICALLY IDENTIFIED language, e.g., *Python*] using [DYNAMICALLY IDENTIFIED key frameworks/libraries, e.g., **AWS Lambda, Pandas, and S3**]. Its main purpose is to [project function, e.g., ingest raw data, transform it according to defined business rules, and store the results for analytics]. Key abstractions like [Abstraction A name] and [Abstraction B name] suggest a focus on [identified core functionality, e.g., efficient data manipulation and scalable event handling].{lang_hint}",
   "relationships": [
     {{
-      "from_abstraction": "0 # AbstractionName1",
-      "to_abstraction": "1 # AbstractionName2",
-      "label": "Manages data for{lang_hint}"
+      "from_abstraction": "0 # DataIngestionLambda",
+      "to_abstraction": "1 # DataTransformationService (Pandas)",
+      "label": "Passes raw data to (via identified S3 event trigger and identified data format, e.g., Parquet){lang_hint}"
     }},
     {{
-      "from_abstraction": "2 # AbstractionName3",
-      "to_abstraction": "0 # AbstractionName1",
-      "label": "Is configured by{lang_hint}"
+      "from_abstraction": "1 # DataTransformationService (Pandas)",
+      "to_abstraction": "2 # ReportingModule (using identified DB client)",
+      "label": "Writes transformed data to (using identified DB client, e.g., psycopg2, to identified PostgreSQL DB){lang_hint}"
     }}
-    // ... include ALL relationships between ALL abstractions
+    // ... include ALL relationships between ALL abstractions, with labels explaining the mechanism via IDENTIFIED TECHNOLOGIES
   ]
 }}"""
 
@@ -262,49 +287,55 @@ def get_order_chapters_prompt(
     Args:
         project_name: Name of the project
         abstraction_listing: Formatted list of abstraction indices and names
-        context: Context about relationships and project summary
+        context: Context about relationships and project summary (potentially including identified tech stack info)
         list_lang_note: Optional language note for the input list
         
     Returns:
         Formatted prompt string
     """
     return f"""
-Given the following project abstractions and their relationships for the project ```` {project_name} ````:
+Given the following project abstractions and their relationships for the project `{project_name}` (which may include details on their DYNAMICALLY IDENTIFIED technology stack, implementation, and interdependencies):
 
 Abstractions (Index # Name){list_lang_note}:
 {abstraction_listing}
 
-Context about relationships and project summary:
+Context about Project Summary and Abstraction Relationships (including interaction mechanisms via IDENTIFIED TECHNOLOGIES):
 {context}
 
-If you are going to make a comprehensive tutorial for ```` {project_name} ````, what is the best order to explain these abstractions, from first to last?
-Ideally, first explain those that are the most important or foundational, perhaps user-facing concepts or entry points. Then move to more detailed, lower-level implementation details or supporting concepts. Inspired by the "Tabulation" approach from Dynamic Programming.
+Your task is to determine the optimal chapter order for a comprehensive technical tutorial of `{project_name}`. The primary goal of this tutorial is to enable a developer to understand the codebase so deeply that they could, in principle, recreate its core components and their interactions.
 
-Create a logical progression that maximizes learning effectiveness:
-1. Start with core concepts that provide an architectural overview
-2. Move to foundational abstractions that many other parts depend on
-3. Cover major subsystems and their components
-4. Address specialized or advanced abstractions that build on earlier concepts
-5. Ensure that no abstraction is presented before the abstractions it depends on
+To achieve this, the chapter order MUST follow a logical progression that facilitates deep understanding and mental model construction. Consider these principles for ordering:
+1.  **Dependency-First (Conceptual and Technical)**:
+    *   Explain foundational or prerequisite abstractions before those that depend on or build upon them. This applies to both conceptual dependencies (e.g., a core data model before a service that uses it) and technical dependencies (e.g., a base class or utility module before its consumers; a messaging infrastructure before services that publish/subscribe to it, especially if these are DYNAMICALLY IDENTIFIED from the context).
+    *   Analyze the provided `relationships` (which detail interaction mechanisms via IDENTIFIED TECHNOLOGIES) to infer these dependencies.
+2.  **Build from Core to Periphery**: 
+    *   Start with the most central, architecturally significant, or fundamental abstractions that define the core purpose or structure of the project (based on the DYNAMICALLY IDENTIFIED architecture).
+    *   Gradually move towards more specialized, supporting, or peripheral abstractions.
+3.  **Minimize Forward References**: Structure the order to minimize the need for a reader to understand concepts that haven't been explained yet. While some forward referencing might be unavoidable in complex systems, strive for a flow that builds knowledge incrementally.
+4.  **Complexity Progression**: If possible, introduce simpler or more self-contained abstractions before highly complex or heavily interconnected ones, assuming dependencies allow.
+5.  **User/Entry-Point Perspective (If Applicable)**: If the system has clear user-facing entry points or primary use-case flows (and these can be DYNAMICALLY IDENTIFIED from the abstractions, e.g., an API Gateway, a main UI component), it might be logical to start with these high-level interaction points before diving into their underlying components. However, balance this with the dependency-first principle.
 
-IMPORTANT: Do not prioritize testing frameworks, test utilities, or any testing-related abstractions in your ordering. Focus on explaining the core functionality of the application rather than how to test it.
+Inspired by the "Tabulation" approach from Dynamic Programming, aim for an order where each chapter builds upon the established knowledge from previous chapters.
+
+IMPORTANT: Do not prioritize testing frameworks, test utilities, or any testing-related abstractions in your ordering. Focus on explaining the core functionality and architecture of the application itself.
 
 RESPONSE FORMAT REQUIREMENTS:
-1. Output ONLY a JSON5 array with NO explanatory text before or after
-2. Do NOT include any explanation, discussion, or notes about the JSON structure
-3. Do NOT describe what you're going to do - just provide the JSON5 directly
-4. Your entire response must be parseable as valid JSON5
-5. Start your response with the opening bracket "[" and end with the closing bracket "]"
-6. Each array element must be a string in the format "idx # AbstractionName"
-7. Include ALL abstractions in your ordered list
+1. Output ONLY a JSON5 array with NO explanatory text before or after.
+2. Do NOT include any explanation, discussion, or notes about the JSON structure.
+3. Do NOT describe what you're going to do - just provide the JSON5 directly.
+4. Your entire response must be parseable as valid JSON5.
+5. Start your response with the opening bracket "[" and end with the closing bracket "]".
+6. Each array element must be a string in the format "idx # AbstractionName".
+7. Include ALL abstractions in your ordered list.
 
 Here is the exact format to follow. Begin your response immediately with this JSON5 structure:
 
 [
-  "2 # FoundationalConcept",
-  "0 # CoreClassA",
-  "1 # CoreClassB (uses CoreClassA)",
-  // ... include ALL abstractions in the optimal learning order
+  "2 # [Example] CoreDataModel (Defines foundational structures used by identified ORM X)",
+  "0 # [Example] ConfigurationService (Provides settings for identified framework Y)",
+  "1 # [Example] MainBusinessLogicService (Uses CoreDataModel, configured by ConfigurationService, built on identified framework Y)",
+  "3 # [Example] APIGateway (Exposes MainBusinessLogicService via identified protocol Z, e.g., REST with Spring MVC)"
+  // ... include ALL abstractions in the optimal learning and recreation-focused order, considering DYNAMICALLY IDENTIFIED dependencies and architecture
 ]"""
 
 
@@ -352,8 +383,9 @@ def get_write_chapter_prompt(
     Returns:
         Formatted prompt string
     """
-    return f"""
-{language_instruction}Write a comprehensive, in-depth tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
+    return f"""{language_instruction}Write a comprehensive, in-depth tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
+
+**OVERALL GOAL**: Your primary objective is to explain this abstraction in such detail and with such focus on the **specifics of the provided codebase context (its languages, frameworks, libraries, and evident CS principles that YOU MUST DYNAMICALLY IDENTIFY from the provided context)** that a developer reading this chapter could gain a deep enough understanding to conceptually recreate a similar implementation. All explanations must be **LOSSLESS**, capturing all critical implementation details and design rationale inferable from the context.
 
 Concept Details{concept_details_note}:
 - Name: {abstraction_name}
@@ -366,99 +398,113 @@ Complete Tutorial Structure{structure_note}:
 Context from previous chapters{prev_summary_note}:
 {previous_chapters_summary if previous_chapters_summary else "This is the first chapter."}
 
-Relevant Code Snippets (Code itself remains unchanged):
+Relevant Code Snippets (Code itself remains unchanged. Focus on explaining HOW and WHY this code works in the context of the project's **dynamically identified specific technology stack**):
+
 {file_context_str if file_context_str else "No specific code snippets provided for this abstraction."}
 
 Instructions for the chapter (Generate content in {language.capitalize()} unless specified otherwise):
-- Be STRICTLY LOSSLESS and COMPREHENSIVE - capture ALL aspects of this abstraction from the provided context/data.
-- The chapter should be thorough and detailed, covering the abstraction from basic concepts to advanced usage patterns.
-- **IMPORTANT**: Maintain a HIGHLY TECHNICAL writing style throughout. Readers are senior software developers who need in-depth technical explanations.
 
-- Start with a clear heading (e.g., `# Chapter {chapter_num}: {abstraction_name}`). Use the provided concept name.
+- Be STRICTLY LOSSLESS and COMPREHENSIVE - capture ALL aspects of this abstraction from the provided context/data.
+- The chapter should be thorough and detailed, covering the abstraction from basic concepts to advanced usage patterns, always linking back to the **specific implementation strategies and technologies dynamically identified as used in this codebase**.
+- **IMPORTANT**: Maintain a HIGHLY TECHNICAL writing style throughout. Readers are senior software developers who need in-depth technical explanations tailored to the project's **dynamically identified stack**.
+
+- Start with a clear heading (e.g., `# Chapter {{{{chapter_num}}}}: {{{{abstraction_name}}}}`). Use the provided concept name.
 
 - If this is not the first chapter, begin with a brief transition from the previous chapter{instruction_lang_note}, referencing it with a proper Markdown link using its name{link_lang_note}.
 
 - Begin with a problem statement section that:
-  * Clearly articulates the technical challenge this abstraction solves{instruction_lang_note}
-  * Explains the architectural consequences of NOT having this abstraction
-  * Provides a concrete, technical example of the problem (with code if applicable)
-  * Uses a real-world analogy but immediately connects it back to the technical domain
+  * Clearly articulates the technical challenge this abstraction solves **within the context of this specific project and its dynamically identified technology stack**{instruction_lang_note}.
+  * Explains the architectural consequences of NOT having this abstraction, considering the project's **dynamically identified frameworks and patterns**.
+  * Provides a concrete, technical example of the problem (with code if applicable, reflecting the codebase's **dynamically identified language/framework**).
+  * Uses a real-world analogy but immediately connects it back to the technical domain, specifically how this problem manifests and is solved using the **dynamically identified technologies and patterns of this codebase**. Each part of the analogy must be mapped to a specific technical aspect of the abstraction being discussed.
+
+- **CRITICAL REQUIREMENT FOR ALL HEADINGS AND LIST ITEMS**: 
+  * EVERY heading (H1, H2, H3, etc.) and EVERY list item (bullet points, numbered lists) MUST be followed by at least one, preferably multiple, detailed technical paragraph(s) (minimum 5-7 sentences each). 
+  * These paragraphs must provide in-depth explanations of the concept introduced by the heading or list item.
+  * Focus on:
+    * The "why" and "how" from a technical perspective, **as implemented in this codebase using its DYNAMICALLY IDENTIFIED technologies**.
+    * Underlying computer science principles, data structures, and algorithms, **and how they are applied or manifested using the project's DYNAMICALLY IDENTIFIED specific language features and framework capabilities**.
+    * Design patterns applied and the rationale behind them, **detailing how they are realized with the codebase's DYNAMICALLY IDENTIFIED tech stack**.
+    * Technical trade-offs (e.g., "This approach, using [a specific framework feature you DYNAMICALLY IDENTIFY, like 'a particular change detection strategy' or 'a component memoization feature'], optimizes for rendering performance...").
+    * Boundary conditions, edge cases, and robust error handling strategies **relevant to the DYNAMICALLY IDENTIFIED implementation**.
+    * Performance characteristics, scalability considerations, and potential bottlenecks, **considering the project's DYNAMICALLY IDENTIFIED specific framework and architecture**.
+    * How this specific part of the abstraction interacts with other parts of the abstraction or other related abstractions, detailing the mechanisms (e.g., API calls via [the specific HTTP client library you IDENTIFY], event emissions using [the specific event library/pattern you IDENTIFY, like RxJS subjects or Node.js EventEmitter], shared state via [the specific state management solution you IDENTIFY]) used **within the given codebase context**.
+    * **How DYNAMICALLY IDENTIFIED specific language features (e.g., Python decorators, Java annotations, JavaScript async/await), framework capabilities (e.g., specific dependency injection mechanisms, ORM features, template engine syntax), or library functions are used to implement this part of the abstraction.**
+  * DO NOT introduce a heading or list item and leave it with only a brief or superficial explanation. Depth and **codebase-specificity based on DYNAMIC IDENTIFICATION** are paramount.
 
 - For each major aspect of the abstraction, create dedicated technical sections that:
-  * Begin with an H2/H3 heading clearly identifying the concept
-  * Provide detailed technical explanations of internal mechanisms, not just surface-level behavior
-  * Explain design patterns being applied (Singleton, Factory, Observer, etc.) with rationale
-  * Discuss technical trade-offs made in the implementation ("This approach optimizes for X at the cost of Y")
-  * Describe boundary conditions, edge cases, and error handling strategies
-  * Explore performance characteristics and scalability considerations
+  * Begin with an H2/H3 heading clearly identifying the concept. Ensure this heading is followed by detailed explanatory paragraphs as per the critical requirement above.
+  * Provide detailed technical explanations of internal mechanisms, not just surface-level behavior, **focusing on how the project's DYNAMICALLY IDENTIFIED tools achieve this**.
+  * Explain design patterns being applied (Singleton, Factory, Observer, etc.) with rationale and how they are implemented **using the specific language constructs and framework features DYNAMICALLY IDENTIFIED in this project**.
+  * Discuss technical trade-offs made in the implementation ("This approach optimizes for X at the cost of Y") in detail, **grounded in the project's DYNAMICALLY IDENTIFIED context**.
+  * Describe boundary conditions, edge cases, and error handling strategies comprehensively, **as they would apply to this codebase based on its DYNAMICALLY IDENTIFIED stack**.
+  * Explore performance characteristics and scalability considerations in depth, **relevant to the DYNAMICALLY IDENTIFIED chosen tech stack**.
 
 - Include ALL relevant code examples for this abstraction from the codebase. For each code example:
-  * Show complete implementation details with proper context
-  * Annotate with line-by-line technical explanation of non-trivial aspects
-  * Highlight key design patterns, idioms, or language features being leveraged
-  * Note any optimizations or performance considerations
-  * If multiple implementations exist, compare and contrast their technical merits
+  * Show complete implementation details with proper context.
+  * Annotate with line-by-line technical explanation of non-trivial aspects. Each annotation should be substantial and explain **how that line contributes to the abstraction using the project's DYNAMICALLY IDENTIFIED language/framework features**.
+  * Highlight key design patterns, idioms, or language/framework features being leveraged, explaining their significance **in achieving the abstraction's goals within this specific codebase, using DYNAMICALLY IDENTIFIED technologies**.
+  * Note any optimizations or performance considerations, explaining how they work **in this DYNAMICALLY IDENTIFIED environment**.
+  * If multiple implementations exist (e.g., different ways a service could be written), compare and contrast their technical merits **within the project's DYNAMICALLY IDENTIFIED architectural style**.
 
-- Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}.
+- Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}, following the detailed paragraph requirement and focusing on **how this code works with the project's DYNAMICALLY IDENTIFIED specific tools**.
 
-- CRITICAL REQUIREMENT FOR BULLET POINTS: When using bullet points in your chapter, ALWAYS follow each bullet point with at least one detailed paragraph (5+ sentences) that thoroughly explains the technical aspects of that point. Never leave bullet points unexplained. For example:
+- When using bullet points or any list format in your chapter, ALWAYS follow each list item with at least one detailed paragraph (minimum 5-7 sentences) that thoroughly explains the technical aspects of that point, its relevance to the abstraction, and its implications **within the DYNAMICALLY IDENTIFIED codebase**. Never leave list items unexplained or superficially explained. For example (illustrative, YOU MUST adapt this to the DYNAMICALLY IDENTIFIED technologies):
 
-  * Define entity relationships
+  * Define entity relationships (if discussing a data-centric abstraction in the context of an ORM DYNAMICALLY IDENTIFIED from the codebase):
     
-    Entity relationships establish the formal connections between domain objects, implementing concepts like aggregation, composition, and association from object-oriented design. These relationships transcend mere references between objects, encoding cardinality constraints (one-to-many, many-to-many), cascading behaviors for persistence operations, and navigability rules that dictate traversal paths through the domain model. Well-defined relationships serve as the semantic foundation for data integrity rules, enabling the system to enforce business invariants through referential integrity constraints. They also inform how change propagation occurs throughout the system when state modifications happen to related entities.
+    In this system, entity relationships, likely managed by [the specific ORM you DYNAMICALLY IDENTIFIED, e.g., SQLAlchemy, Hibernate, TypeORM, Prisma] (inferred from the codebase context and common patterns associated with the DYNAMICALLY IDENTIFIED backend framework like Django, Spring Boot, NestJS, etc.), establish the formal connections between domain objects like `User` and `Article`. These are not just conceptual links but translate to concrete database schema definitions (e.g., foreign keys, join tables) and runtime behaviors facilitated by [the identified ORM's specific features, e.g., decorators, annotations, or model definitions]. For instance, a `OneToMany` relationship (or its equivalent in [the identified ORM]) from `User` to `Article` would imply a user can have multiple articles. This is crucial for data integrity (ensuring an article always has a valid author ID, managed by [the identified ORM's referential integrity mechanisms]) and for query efficiency (allowing eager or lazy loading of related articles via [the identified ORM's specific query-building or relation-loading mechanisms]). The choice of cascade options (e.g., `cascade: ['insert', 'update']` or their equivalent in [the identified ORM]) on such a relationship dictates how persistence operations on a `User` entity affect its related `Article` entities, directly impacting data consistency. [The identified ORM] then uses this metadata to generate appropriate database queries (e.g., SQL for relational DBs), abstracting the developer from raw database interactions while enforcing these structural and behavioral rules. Performance considerations here include choosing between eager loading (potentially causing over-fetching) and lazy loading (potentially leading to N+1 query problems if not handled carefully with mechanisms like [specific features of the identified ORM, e.g., 'joinedload' in SQLAlchemy, 'fetch joins' in JPA, or 'relations' options in TypeORM's find queries]).
 
-- EXPLICITLY ENSURE all bullet points are expanded with detailed paragraphs. The detailed explanations should include:
-  * Underlying theoretical computer science principles
-  * Implementation considerations and technical trade-offs
-  * Performance implications and optimization strategies 
-  * Common design variations and their consequences
-  * Language-agnostic explanations that focus on core concepts rather than specific syntax
+- EXPLICITLY ENSURE all list items (bullet points, numbered lists) are expanded with detailed paragraphs. The detailed explanations should include:
+  * Underlying theoretical computer science principles (e.g., graph theory for relationships, state machines for lifecycle management), **and how the project's DYNAMICALLY IDENTIFIED specific libraries or framework features implement or relate to these principles.**
+  * Implementation considerations and technical trade-offs **faced when using the project's DYNAMICALLY IDENTIFIED chosen technologies** (e.g., performance impact of [a specific data fetching strategy in the identified framework] vs. another).
+  * Performance implications and optimization strategies **available within the project's DYNAMICALLY IDENTIFIED framework** (e.g., specific list rendering optimizations like `trackBy` in Angular or `key` prop in React).
+  * Common design variations and their consequences **when building with this DYNAMICALLY IDENTIFIED specific tech stack**.
+  * Explain core concepts, **then immediately show how these concepts are instantiated or utilized by the DYNAMICALLY IDENTIFIED specific languages, frameworks, or libraries used in this project.**
 
-- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a detailed sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - include at least 5-8 participants to ensure proper representation of the flow. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n```{mermaid_lang_note}.
+- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called, **explaining how the codebase's DYNAMICALLY IDENTIFIED specific architectural components (e.g., specific service types, controller patterns, state store structures) participate in this flow**{instruction_lang_note}. It's recommended to use a detailed sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - include at least 5-8 participants to ensure proper representation of the flow. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\\nsequenceDiagram\\n    participant A as ComponentA\\n    participant B as ComponentB\\n    A->>B: Request\\n    B->>A: Response\\n```{mermaid_lang_note}. Ensure the diagram and its explanation are detailed and technically rich, reflecting the project's **DYNAMICALLY IDENTIFIED** components.
 
 - Then dive deeper into code for the internal implementation with references to files. Provide explicit technical details on:
-  * Initialization sequences and dependency management
-  * Runtime behavior and control flow
-  * Memory management considerations (if applicable)
-  * Threading/concurrency concerns (if applicable)
-  * How errors propagate through the system
-  * Performance optimizations implemented (caching, lazy loading, etc.)
+  * Initialization sequences and dependency injection/management strategies **as employed by the project's DYNAMICALLY IDENTIFIED framework (e.g., specific DI syntax or patterns for the identified framework)**.
+  * Runtime behavior, control flow, and algorithmic complexity of key operations, **explaining how DYNAMICALLY IDENTIFIED language/framework features support this**.
+  * Memory management considerations (e.g., object lifecycles, caching strategies using specific libraries if evident from context, potential memory leaks if [e.g., event listeners or subscriptions in the identified asynchronous programming model like RxJS or Promises] aren't managed).
+  * Threading/concurrency concerns (e.g., the event loop in Node.js/browser JavaScript, goroutines in Go, async/await patterns in Python/C#/JS, or specific threading models if a multi-threaded language is identified).
+  * How errors and exceptions are propagated and handled through the system, **potentially using DYNAMICALLY IDENTIFIED framework-specific error handlers or common patterns like try-catch with async/await in the identified language**.
+  * Performance optimizations implemented (e.g., [framework-specific rendering optimizations like memoization or virtual DOM strategies], [specific state management library's memoized selectors], specific library features for efficient data handling DYNAMICALLY IDENTIFIED from context), **explaining how these DYNAMICALLY IDENTIFIED specific techniques work**.
 
-- IMPORTANT: Explicitly discuss how this abstraction interacts with EVERY other related abstraction. When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
+- IMPORTANT: Explicitly discuss how this abstraction interacts with EVERY other related abstraction. These interactions must be explained technically, detailing data flow, control flow, and dependencies **using the mechanisms provided by the project's DYNAMICALLY IDENTIFIED framework (e.g., specific state management patterns, component communication methods like props/events or context APIs, service-to-service invocation patterns)**. When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
 
 - Cover ALL aspects of the abstraction, including edge cases and advanced usage patterns. Include technical sections on:
-  * Core functionality and internal mechanisms (not just API surface)
-  * Initialization and configuration with deep technical details
-  * Error handling strategies and failure modes
-  * Performance characteristics and optimization techniques
-  * Integration patterns with other system components
-  * Architectural patterns it implements (with detailed explanation of pattern implementation)
-  * Known limitations or constraints and their technical reasons
+  * Core functionality and internal mechanisms (not just API surface), explained with CS principles **as applied by the project's DYNAMICALLY IDENTIFIED tech stack**.
+  * Initialization and configuration with deep technical details (e.g., configuration schemas used by a specific library you IDENTIFY, validation, dynamic reconfiguration if the DYNAMICALLY IDENTIFIED framework supports it).
+  * Error handling strategies, failure modes, and recovery mechanisms (e.g., retry logic using [features of an identified async library like RxJS `retryWhen` or a promise-based retry utility], circuit breakers if a library for this is IDENTIFIED, idempotency considerations for API calls).
+  * Performance characteristics, benchmarking results (if applicable/inferable), and optimization techniques **specific to the project's DYNAMICALLY IDENTIFIED environment**.
+  * Integration patterns with other system components (e.g., message queues, external APIs via [specific HTTP client libraries IDENTIFIED like Axios or Fetch API], databases via an [IDENTIFIED ORM like Sequelize or Django ORM]), explaining the protocols and data formats involved.
+  * Architectural patterns it implements (e.g., MVC in a traditional backend, MVVM/MVC in a frontend framework, CQRS with a state management library), with a detailed explanation of how the pattern is realized **using the tools and structures DYNAMICALLY IDENTIFIED in this specific project**.
+  * Known limitations or constraints and their underlying technical reasons, **often tied to the DYNAMICALLY IDENTIFIED chosen framework or language version**.
 
 - Include a technical best practices section that:
-  * Identifies common pitfalls when using this abstraction
-  * Provides optimized usage patterns for different scenarios
-  * Discusses scaling considerations
-  * Addresses any version-specific considerations or compatibility issues
+  * Identifies common pitfalls and anti-patterns when using or extending this abstraction **within the project's DYNAMICALLY IDENTIFIED specific framework/language context**.
+  * Provides optimized usage patterns for different scenarios, backed by technical reasoning **relevant to the project's DYNAMICALLY IDENTIFIED tools**.
+  * Discusses scaling considerations and how the abstraction behaves under high load, **given its implementation with the project's DYNAMICALLY IDENTIFIED tech stack**.
+  * Addresses any version-specific considerations or compatibility issues of the DYNAMICALLY IDENTIFIED frameworks/libraries used, explaining the technical differences.
 
-- Use mermaid diagrams to illustrate complex concepts with PROPER mermaid syntax. ALWAYS begin with the diagram type (e.g., `sequenceDiagram`, `flowchart LR`, `classDiagram`, etc.) and use the correct syntax for that diagram type. For sequence diagrams, use proper arrow syntax like `->>`, `-->>`, `-->`, etc. NOT just `->`. For flowcharts, use proper node and connection syntax. Example with correct syntax: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n``` {mermaid_lang_note}.
+- **CODEBASE-SPECIFIC TECHNOLOGIES (DYNAMICALLY IDENTIFIED) AND UNDERLYING PRINCIPLES**: Present ALL explanations by first **DYNAMICALLY IDENTIFYING and then focusing on the specific programming languages, frameworks, libraries, and architectural patterns evident in the provided codebase context**. Your primary goal is to explain how *these DYNAMICALLY IDENTIFIED specific tools* are used to build the abstraction. Then, connect these specific implementations back to fundamental computer science principles and broader architectural patterns to provide a deeper understanding.
+    *   For example, if your analysis of the codebase context reveals the use of a particular frontend framework (e.g., React, Angular, Vue, Svelte) and a specific state management library (e.g., Redux, Vuex, Zustand, NgRx, Pinia), your explanation for an abstraction should first detail how it *specifically* utilizes the core constructs of *that identified framework* (e.g., its component model, lifecycle hooks, service/provider patterns) and *that identified state library* (e.g., its specific mechanisms for actions, state updates, selectors, and side-effect handling). After thoroughly explaining this usage of the *identified tools*, you must then connect these specific implementations to the underlying CS concepts these features embody, such as reactive programming, the observer pattern, virtual DOM diffing, unidirectional data flow, or specific state management patterns (like Flux, Elm architecture, etc.).
+    *   Focus on how the *DYNAMICALLY IDENTIFIED chosen tools* solve the problem (e.g., "The [identified framework's DI system, such as Spring's @Autowired or Angular's constructor injection,] is used here to provide the [specific service name], which decouples the [specific component/module name] from the direct instantiation of its dependencies, an application of the Inversion of Control principle.").
+    *   Discuss the underlying algorithms and data structures, and then show or infer how they might be implemented or leveraged by the project's **DYNAMICALLY IDENTIFIED language/framework** (e.g., "The efficiency of the [specific feature, like tag lookup] suggests a hash map is used internally, which in [the identified language, like TypeScript or Python] could be a `Map` object or a dictionary respectively, because this allows for O(1) average time complexity for insertions and lookups.").
+    *   Explain architectural decisions in terms of *why this project likely chose these DYNAMICALLY IDENTIFIED specific technologies/patterns* to solve its problems (e.g., "[The identified state management library, like NgRx or Redux] was likely chosen to handle complex application state, offering predictability and traceability through [its specific mechanisms, like unidirectional data flow and immutable updates], which is beneficial for larger applications like this one.").
+    *   Highlight how the unique features of the project's **DYNAMICALLY IDENTIFIED tech stack** (e.g., static typing in TypeScript, observable streams in RxJS if identified, specific component lifecycle hooks of the identified framework) are leveraged by this abstraction to provide its functionality robustly and efficiently.
 
-- TECHNOLOGY AGNOSTICISM: Present all explanations in a way that emphasizes fundamental computer science principles that apply across languages and frameworks. When discussing implementations:
-  * Focus on abstract patterns rather than specific syntax
-  * Discuss the underlying algorithms and data structures
-  * Explain architectural decisions in technology-neutral terms
-  * Present multiple implementation approaches across different paradigms (OOP, functional, etc.)
-  * Highlight universal principles that transcend specific technology stacks
-
-- Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand, but ALWAYS follow analogies with detailed technical specifics.
+- Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand, but ALWAYS follow analogies with detailed technical specifics **directly relevant to the abstraction and how it's built using the codebase's DYNAMICALLY IDENTIFIED specific technologies**. The analogy should illuminate a complex technical point *about the codebase's DYNAMICALLY IDENTIFIED specific implementation*, not replace it.
 
 - End the chapter with a technical conclusion that:
-  * Summarizes the key technical insights about the abstraction
-  * Highlights architectural patterns and principles demonstrated
-  * Connects this abstraction to broader system architecture
+  * Summarizes the key technical insights about the abstraction, its design, and its role **within the project's DYNAMICALLY IDENTIFIED specific architecture**.
+  * Highlights the core architectural patterns and computer science principles demonstrated by this abstraction, **as implemented with the project's DYNAMICALLY IDENTIFIED tools**.
+  * Reinforces how this abstraction connects to the broader system architecture of the project.
   * Provides a transition to the next chapter{instruction_lang_note}. If there is a next chapter, use a proper Markdown link: [Next Chapter Title](next_chapter_filename){link_lang_note}.
 
-- Ensure the tone is welcoming yet technically precise and substantive{tone_note}.
+- Ensure the tone is welcoming yet technically precise, substantive, and authoritative{tone_note}.
 
 - IMPORTANT: DO NOT include any content related to unit tests, end-to-end (e2e) tests, integration tests, or any other types of testing in the tutorial. Skip all testing-related code and explanations. Focus exclusively on explaining the abstractions, concepts, and how to use them without any test coverage discussions.
 
