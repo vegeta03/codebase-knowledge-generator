@@ -106,13 +106,13 @@ try:
         ts_parser, _ = get_typescript_parser()
         if ts_parser is not None:
             AVAILABLE_LANGUAGES.add('typescript')
-            logger.info("Tree-sitter TypeScript support loaded successfully")
+            logger.debug("Tree-sitter TypeScript support loaded successfully")
         
         # Test if we can actually get TSX parser
         tsx_parser, _ = get_tsx_parser()
         if tsx_parser is not None:
             AVAILABLE_LANGUAGES.add('tsx')
-            logger.info("Tree-sitter TSX support loaded successfully")
+            logger.debug("Tree-sitter TSX support loaded successfully")
             
         if not AVAILABLE_LANGUAGES:
             logger.warning("TypeScript/TSX parsers could not be initialized")
@@ -130,12 +130,12 @@ try:
                     parser = get_parser(lang)
                     if parser is not None:
                         AVAILABLE_LANGUAGES.add(lang)
-                        logger.info(f"Tree-sitter {lang} support loaded successfully")
+                        logger.debug(f"Tree-sitter {lang} support loaded successfully")
                 except (ImportError, ValueError, AttributeError, Exception) as e:
                     # Silently continue if a language isn't available
                     pass
                 
-        logger.info(f"Total available languages: {len(AVAILABLE_LANGUAGES)}")
+        logger.debug(f"Total available languages: {len(AVAILABLE_LANGUAGES)}")
         
     except ImportError:
         logger.warning("tree-sitter-language-pack not available, only TypeScript and TSX supported")

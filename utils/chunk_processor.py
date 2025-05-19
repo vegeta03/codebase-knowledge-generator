@@ -52,15 +52,15 @@ def process_code_for_llm(base_dir: str,
     effective_max_tokens = max_input_tokens - prompt_token_estimate
     
     # Log the context settings
-    logger.info(f"Model context length: {current_model_context_length}")
-    logger.info(f"Max input tokens (80%): {max_input_tokens}")
-    logger.info(f"Effective max tokens for code: {effective_max_tokens}")
-    logger.info(f"Processing {len(file_paths)} files with total size: {sum(len(content) for content in file_contents.values())} characters")
+    logger.debug(f"Model context length: {current_model_context_length}")
+    logger.debug(f"Max input tokens (80%): {max_input_tokens}")
+    logger.debug(f"Effective max tokens for code: {effective_max_tokens}")
+    logger.debug(f"Processing {len(file_paths)} files with total size: {sum(len(content) for content in file_contents.values())} characters")
     
     # Generate chunks using the hierarchical AST-aware chunking system
-    logger.info("Starting hierarchical AST-aware chunking process...")
+    logger.debug("Starting hierarchical AST-aware chunking process...")
     chunks = chunk_codebase(base_dir, file_paths, file_contents)
-    logger.info(f"Generated {len(chunks)} chunks using hierarchical AST-aware chunking")
+    logger.debug(f"Generated {len(chunks)} chunks using hierarchical AST-aware chunking")
     
     # Log chunk details
     total_token_count = 0
@@ -68,15 +68,15 @@ def process_code_for_llm(base_dir: str,
     for i, chunk in enumerate(chunks):
         total_token_count += chunk["token_count"]
         total_files_covered.update(chunk["files"])
-        logger.info(f"Chunk {i+1} (ID: {chunk['chunk_id']}) - {chunk['token_count']} tokens, " 
+        logger.debug(f"Chunk {i+1} (ID: {chunk['chunk_id']}) - {chunk['token_count']} tokens, " 
                    f"covers {len(chunk['files'])} files, level: {chunk.get('level', 'unknown')}")
                    
     # Calculate overlap statistics
     if len(chunks) > 0 and "overlap_percentage" in chunks[0]:
-        logger.info(f"Chunk overlap: {chunks[0]['overlap_percentage']}%")
+        logger.debug(f"Chunk overlap: {chunks[0]['overlap_percentage']}%")
     
-    logger.info(f"Average tokens per chunk: {total_token_count / len(chunks) if chunks else 0:.2f}")
-    logger.info(f"Total files covered by all chunks: {len(total_files_covered)} of {len(file_paths)}")
+    logger.debug(f"Average tokens per chunk: {total_token_count / len(chunks) if chunks else 0:.2f}")
+    logger.debug(f"Total files covered by all chunks: {len(total_files_covered)} of {len(file_paths)}")
     
     # Prepare the final prompts
     prepared_prompts = []
@@ -102,7 +102,7 @@ def process_code_for_llm(base_dir: str,
                 "estimated_response_tokens": int(current_model_context_length * 0.2)
             })
             
-            logger.info(f"Prepared prompt for chunk {chunk['chunk_id']} with {total_tokens} tokens "
+            logger.debug(f"Prepared prompt for chunk {chunk['chunk_id']} with {total_tokens} tokens "
                        f"({chunk_utilization:.2f}% of max input tokens)")
         else:
             # This should rarely happen with proper chunking, but log it if it does

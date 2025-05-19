@@ -125,18 +125,25 @@ Context (Abstractions, Descriptions, Code):
 2. A comprehensive list (`relationships`) describing ALL significant interactions between these abstractions. For each relationship, specify:
     - `from_abstraction`: Index of the source abstraction (e.g., `0 # AbstractionName1`)
     - `to_abstraction`: Index of the target abstraction (e.g., `1 # AbstractionName2`)
-    - `label`: A brief label for the interaction **in just a few words**{lang_hint} (e.g., "Manages", "Inherits", "Uses").
-    Ideally the relationship should be backed by one abstraction calling or passing parameters to another.
-    Be thorough in identifying ALL relationships, ensuring complete coverage of how abstractions interact.
+    - `label`: A brief, descriptive label for the interaction **in just a few words**{lang_hint}.
+
+    Consider a WIDE VARIETY of technology-agnostic relationship types, such as:
+    - Structural: "Is part of", "Contains", "Composes", "Is a component of"
+    - Dependency: "Depends on", "Requires", "Is configured by", "Uses services from", "Consumes events from", "Produces events for"
+    - Data Flow: "Manages data for", "Produces data for", "Consumes data from", "Provides data to"
+    - Conceptual/Logical: "Specializes", "Implements", "Facilitates", "Orchestrates", "Coordinates with", "Is conceptually linked to"
+    - Invocation/Control Flow: "Invokes", "Calls", "Triggers", "Controls"
+
+    The relationship should ideally be backed by evidence in the provided code context or be a clear architectural or logical link between the abstractions.
+    Be thorough in identifying ALL meaningful relationships, ensuring complete coverage of how abstractions interact.
 
 IMPORTANT INSTRUCTIONS:
-1. Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target).
-2. Each abstraction index must appear at least once across all relationships.
-3. Use ONLY the abstraction indices (0 to {num_abstractions-1}) from the list above, NOT file indices.
-4. Do NOT use file indices or project names in the relationships.
-5. The indices in from_abstraction and to_abstraction must be between 0 and {num_abstractions-1} inclusive.
-6. Exclude any relationships that are solely testing-related. Do not focus on test frameworks, testing utilities, or test implementations when analyzing relationships.
-7. Be COMPREHENSIVE - identify ALL meaningful relationships, not just the most obvious ones.
+1. CRITICAL: EVERY abstraction listed MUST be involved in at least ONE meaningful relationship (either as a source or a target). Do NOT leave any abstraction isolated. If a direct interaction is not obvious, infer logical or conceptual connections based on their descriptions and roles in the system.
+2. Each abstraction index (from 0 to {num_abstractions-1}) MUST appear at least once across all `from_abstraction` or `to_abstraction` fields.
+3. Use ONLY the abstraction indices (0 to {num_abstractions-1}) from the list above. DO NOT use file indices or project names directly in the `from_abstraction` or `to_abstraction` fields.
+4. The indices in `from_abstraction` and `to_abstraction` must be integers between 0 and {num_abstractions-1} inclusive, referencing the abstraction list.
+5. Exclude any relationships that are solely testing-related. Do not focus on test frameworks, testing utilities, or test implementations when analyzing relationships.
+6. Be COMPREHENSIVE and aim for completeness. It is better to include a less obvious but plausible conceptual relationship than to leave an abstraction disconnected.
 
 RESPONSE FORMAT REQUIREMENTS:
 1. Output ONLY a JSON5 object with NO explanatory text before or after
@@ -155,17 +162,93 @@ Here is the exact format to follow. Begin your response immediately with this JS
     {{
       "from_abstraction": "0 # AbstractionName1",
       "to_abstraction": "1 # AbstractionName2",
-      "label": "Manages{lang_hint}"
+      "label": "Manages data for{lang_hint}"
     }},
     {{
       "from_abstraction": "2 # AbstractionName3",
       "to_abstraction": "0 # AbstractionName1",
-      "label": "Provides config{lang_hint}"
+      "label": "Is configured by{lang_hint}"
     }}
-    // ... include ALL relationships between abstractions
+    // ... include ALL relationships between ALL abstractions
   ]
 }}"""
 
+
+def get_abstraction_relationship_completion_prompt(
+    project_name,
+    disconnected_abstractions,
+    abstraction_listing,
+    existing_relationships,
+    language_instruction="",
+    lang_hint=""
+):
+    """
+    Generate a prompt for completing relationships for disconnected abstractions.
+    
+    Args:
+        project_name: Name of the project
+        disconnected_abstractions: List of disconnected abstraction details
+        abstraction_listing: Full list of all abstractions
+        existing_relationships: List of existing relationships for context
+        language_instruction: Optional instruction for non-English output
+        lang_hint: Optional language hint for outputs
+        
+    Returns:
+        Formatted prompt string
+    """
+    return f"""
+{language_instruction}Based on the abstractions in the project and the existing relationships already identified,
+please generate SPECIFIC and CONCEPTUALLY MEANINGFUL relationships for each of these disconnected abstractions.
+
+PROJECT CONTEXT: {project_name}
+
+For each disconnected abstraction, create at least one relationship connecting it to another abstraction.
+The relationship must be conceptually valid and reflect a real architectural connection.
+
+Disconnected abstractions that need relationships:
+{disconnected_abstractions}
+
+Context from all abstractions:
+{abstraction_listing}
+
+Existing relationships for context:
+{existing_relationships}
+
+IMPORTANT GUIDANCE:
+1. Create ONLY meaningful, technology-agnostic relationships based on the likely architectural roles of these abstractions
+2. Each relationship should reflect a standard software architecture concept like:
+   - STRUCTURAL: "Contains", "Is part of", "Composes", "Aggregates", "Consists of"
+   - BEHAVIORAL: "Calls", "Triggers", "Notifies", "Delegates to", "Coordinates"
+   - DEPENDENCY: "Depends on", "Uses", "Requires", "Leverages", "Consumes"
+   - INHERITANCE: "Specializes", "Extends", "Implements", "Refines"
+   - FUNCTIONAL: "Transforms", "Processes", "Validates", "Enriches", "Filters"
+   - COMMUNICATION: "Sends data to", "Receives data from", "Exchanges information with"
+3. Ensure relationships accurately reflect the software architecture domain rather than generic connections
+4. Each abstraction must be connected to at least one other abstraction in a meaningful way
+5. Be specific about each relationship type rather than using generic terms like "relates to"
+
+Respond with ONLY a parseable JSON array containing the relationships with these three fields:
+- from_abstraction: The source abstraction index and name (format: "0 # AbstractionName")
+- to_abstraction: The target abstraction index and name (format: "1 # OtherAbstraction")
+- label: A specific, technical relationship description{lang_hint} (e.g., "Provides configuration to", "Processes data from")
+
+Here is the expected JSON format:
+```json
+[
+  {{
+    "from_abstraction": "5 # DisconnectedAbstraction",
+    "to_abstraction": "2 # ConnectedAbstraction",
+    "label": "Validates data for{lang_hint}"
+  }},
+  {{
+    "from_abstraction": "8 # AnotherDisconnectedAbstraction",
+    "to_abstraction": "5 # DisconnectedAbstraction",
+    "label": "Composes{lang_hint}"
+  }}
+  // Include a relationship for EACH disconnected abstraction
+]
+```
+"""
 
 def get_order_chapters_prompt(
     project_name,

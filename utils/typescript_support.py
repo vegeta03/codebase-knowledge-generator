@@ -24,7 +24,7 @@ def get_typescript_parser():
             from tree_sitter_language_pack import get_parser, get_language
             parser = get_parser("typescript")
             language = get_language("typescript")
-            logger.info("Using production-quality tree-sitter-language-pack TypeScript parser")
+            logger.debug("Using production-quality tree-sitter-language-pack TypeScript parser")
             return parser, language
         except (ImportError, ValueError, AttributeError) as e:
             logger.warning(f"Could not load tree-sitter-language-pack TypeScript parser: {e}")
@@ -94,7 +94,7 @@ def get_typescript_parser():
                         for node in child.walk():
                             yield node
         
-        logger.info("Using simplified TypeScript parser implementation")
+        logger.debug("Using simplified TypeScript parser implementation")
         parser = SimpleParser()
         language = "typescript"  # Just a string identifier
         
@@ -115,7 +115,7 @@ def get_tsx_parser():
             from tree_sitter_language_pack import get_parser, get_language
             parser = get_parser("tsx")
             language = get_language("tsx")
-            logger.info("Using production-quality tree-sitter-language-pack TSX parser")
+            logger.debug("Using production-quality tree-sitter-language-pack TSX parser")
             return parser, language
         except (ImportError, ValueError, AttributeError) as e:
             logger.warning(f"Could not load tree-sitter-language-pack TSX parser: {e}")
@@ -185,7 +185,7 @@ def get_tsx_parser():
                         for node in child.walk():
                             yield node
         
-        logger.info("Using simplified TSX parser implementation")
+        logger.debug("Using simplified TSX parser implementation")
         parser = SimpleParser()
         language = "tsx"  # Just a string identifier
         

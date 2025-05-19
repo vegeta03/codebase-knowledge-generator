@@ -5,6 +5,28 @@ from datetime import datetime
 import time
 import re
 
+# Import json5 for more lenient JSON parsing
+try:
+    import json5
+except ImportError:
+    print("Warning: json5 library not found. This is required for advanced JSON parsing.")
+    print("To install: pip install json5")
+    # Use a fallback for json5 using standard json
+    class FallbackJson5:
+        @staticmethod
+        def loads(s, **kwargs):
+            return json.loads(s, **kwargs)
+    json5 = FallbackJson5()
+
+# Import json_repair library
+try:
+    from json_repair import repair_json as json_repair_lib
+    HAS_JSON_REPAIR = True
+except ImportError:
+    HAS_JSON_REPAIR = False
+    print("Warning: json-repair library not found. Will use built-in repair logic only.")
+    print("To install: pip install json-repair")
+
 # Configure logging
 log_directory = os.getenv("LOG_DIR", "logs")
 os.makedirs(log_directory, exist_ok=True)
@@ -43,8 +65,67 @@ def repair_llm_json(json_str: str) -> str:
     if not isinstance(json_str, str):
         json_str = str(json_str)
     
+    # Nothing to repair for empty strings
+    if not json_str.strip():
+        return json_str
+    
     # Record original length for logging
     original_len = len(json_str)
+    
+    # Before any repair, try to see if it's already valid
+    try:
+        json5.loads(json_str)
+        # If we get here, it's valid JSON
+        logger.debug("No repair needed, input is already valid JSON5")
+        return json_str
+    except Exception:
+        # If parsing fails, proceed with repairs
+        pass
+    
+    # First try the json-repair library if available
+    if HAS_JSON_REPAIR:
+        try:
+            logger.debug("Attempting to repair JSON with json-repair library")
+            repaired = json_repair_lib(json_str)
+            # Verify the repaired string is valid JSON
+            try:
+                json5.loads(repaired)
+                logger.debug("Successfully repaired JSON with json-repair library")
+                return repaired
+            except Exception as e:
+                # If verification fails, continue with our fallback repair logic
+                logger.debug(f"json-repair result failed validation: {str(e)}, using fallback repair")
+        except Exception as e:
+            logger.debug(f"json-repair library failed: {str(e)}, using fallback repair")
+    
+    # Special handling for JSON with an object structure in the description field
+    # This is a particularly common pattern in LLM output that breaks parsing
+    try:
+        # Check if there are nested objects in description fields
+        nested_obj_pattern = r'"description"\s*:\s*{(.+?)(?=,\s*"|\s*})'
+        if re.search(nested_obj_pattern, json_str, re.DOTALL):
+            logger.debug("Detected nested object in description field, flattening")
+            # First, let's try basic flattening
+            def flatten_description(match):
+                content = match.group(1).strip()
+                # Escape quotes to prevent breaking JSON
+                escaped = content.replace('"', '\\"')
+                return '"description": "' + escaped + '"'
+            
+            json_str = re.sub(nested_obj_pattern, flatten_description, json_str, flags=re.DOTALL)
+            
+            # Verify if our fix worked
+            try:
+                json5.loads(json_str)
+                logger.debug("Successfully flattened nested object in description")
+                return json_str
+            except Exception:
+                # If still not valid, continue with other repairs
+                pass
+    except Exception as e:
+        logger.debug(f"Error in nested object handling: {str(e)}")
+    
+    # If json-repair library isn't available or failed, use our built-in repair logic
     
     # 1. Handle multi-line string issues (common with description fields)
     # Replace problematic newlines within quoted strings
@@ -117,7 +198,16 @@ def repair_llm_json(json_str: str) -> str:
     # 9. Fix dangling commas at the end of objects
     json_str = re.sub(r',(\s*})', r'\1', json_str)
     
-    # 10. Fix mismatched bracket issues - only if we can confidently detect them
+    # 10. Fix nested objects in description fields - convert descriptions to strings if needed
+    # This is a common issue with LLM outputs that use nested objects instead of strings
+    json_str = re.sub(r'"description"\s*:\s*{([^}]*)}', r'"description": "\1"', json_str)
+    
+    # 11. Fix single quotes to double quotes for keys and string values
+    # Do this with caution to not break valid escaped quotes within strings
+    json_str = re.sub(r"'([^']*?)'(\s*:)", r'"\1"\2', json_str)  # Fix for keys
+    json_str = re.sub(r':\s*\'([^\']*?)\'', r': "\1"', json_str)  # Fix for values
+    
+    # 12. Fix mismatched bracket issues - only if we can confidently detect them
     # Count opening and closing brackets
     open_square = json_str.count('[')
     close_square = json_str.count(']')
@@ -129,6 +219,41 @@ def repair_llm_json(json_str: str) -> str:
         json_str += ']' * (open_square - close_square)
     if open_curly > close_curly:
         json_str += '}' * (open_curly - close_curly)
+    
+    # Final check - see if we successfully fixed the JSON
+    try:
+        json5.loads(json_str)
+        logger.debug("Successfully repaired JSON with fallback methods")
+    except Exception as e:
+        # If still invalid, log the error but return our best attempt
+        logger.error(f"Failed to repair JSON: {str(e)}")
+        logger.error(f"Problematic JSON: {json_str[:100]}...")
+        
+        # As a last resort, try to extract any valid JSON subset
+        try:
+            # Find anything that looks like a JSON array or object
+            array_match = re.search(r'\[.*\]', json_str, re.DOTALL)
+            object_match = re.search(r'\{.*\}', json_str, re.DOTALL)
+            
+            if array_match:
+                potential_json = array_match.group(0)
+                try:
+                    json5.loads(potential_json)
+                    logger.debug("Extracted valid JSON array as last resort")
+                    return potential_json
+                except:
+                    pass
+                
+            if object_match:
+                potential_json = object_match.group(0)
+                try:
+                    json5.loads(potential_json)
+                    logger.debug("Extracted valid JSON object as last resort")
+                    return potential_json
+                except:
+                    pass
+        except Exception:
+            pass
     
     # Report changes for logging
     changes = len(json_str) - original_len
@@ -146,7 +271,7 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     if is_verbose:
         print(f"\nSending prompt to LLM (length: {len(prompt)} chars)")
         if len(prompt) > 500:
-            # Show truncated prompt in verbose mode for readability
+            # Show truncated prompt preview in verbose mode for readability
             print(f"Truncated prompt preview: {prompt[:250]}...{prompt[-250:]}")
         else:
             print(f"Full prompt: {prompt}")
@@ -193,17 +318,29 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
         print(f"System prompt is enabled: '{system_prompt[:30]}...' (length: {len(system_prompt)})")
     
     # Determine which model will be used based on provider
-    if model_provider == "openrouter":
-        model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-        print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
-        response_text = _call_openrouter(prompt, stream=stream)
-    else:  # Default to groq
-        model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-        print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
-        response_text = _call_groq(prompt, stream=stream)
+    try:
+        if model_provider == "openrouter":
+            model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
+            print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
+            response_text = _call_openrouter(prompt, stream=stream)
+        else:  # Default to groq
+            model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+            print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
+            response_text = _call_groq(prompt, stream=stream)
         
-    if is_verbose:
-        print(f"Additional debug info - Using model provider: {model_provider}")
+        if is_verbose:
+            print(f"Additional debug info - Using model provider: {model_provider}")
+    except SystemExit:
+        # If provider called sys.exit() due to exhausted retries, we don't need to do anything
+        # as the process will exit already
+        raise
+    except Exception as e:
+        # Handle other exceptions that might occur
+        logger.error(f"Unhandled exception in LLM API call: {e}")
+        print(f"\n❌ Fatal error in LLM API call: {e}")
+        print("Exiting program due to unrecoverable error.")
+        import sys
+        sys.exit(1)
 
     # Log the response
     logger.info(f"RESPONSE: {response_text}")
@@ -274,131 +411,154 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
     # Initialize Groq client
     client = Groq(api_key=api_key)
     
-    try:
-        # Call the Groq API
-        if is_verbose:
-            print("Sending request to Groq API...")
+    # Prepare messages list based on system prompt setting
+    messages = []
+    if use_system_prompt:
+        # Ensure critical anti-testing instruction is part of the system prompt
+        anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+        if anti_testing_instruction not in system_prompt:
+            system_prompt += anti_testing_instruction
+        messages.append({"role": "system", "content": system_prompt})
+    messages.append({"role": "user", "content": prompt})
+    
+    # Define fixed retry schedule as requested
+    max_retry_attempts = 3  # Total of 3 retries
+    retry_delays = [60, 120, 150]  # Exact delay in seconds for each retry
+    
+    # Try the API call with retries
+    retry_count = 0
+    last_error = None
+    response = None
+    full_response = ""  # For streaming mode
+    
+    while retry_count <= max_retry_attempts:
+        try:
+            if is_verbose and retry_count > 0:
+                print(f"\n[Retry {retry_count}/{max_retry_attempts}] Attempting API call...")
+            
+            # Log retry attempts
+            if retry_count > 0:
+                logger.warning(f"Retrying Groq API call (attempt {retry_count}/{max_retry_attempts})")
+                # Use fixed delay based on retry count
+                retry_delay = retry_delays[retry_count - 1]
+                print(f"Waiting {retry_delay} seconds before retry...")
+                time.sleep(retry_delay)
+            
             start_time = datetime.now()
-        
-        # Prepare messages list based on system prompt setting
-        messages = []
-        if use_system_prompt:
-            # Ensure critical anti-testing instruction is part of the system prompt
-            anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
-            if anti_testing_instruction not in system_prompt:
-                system_prompt += anti_testing_instruction
-            messages.append({"role": "system", "content": system_prompt})
-        messages.append({"role": "user", "content": prompt})
-        
-        # Handle streaming differently if enabled
-        if stream:
-            full_response = ""
             
-            # Using streaming API with improved error handling for network interruptions
-            max_retry_attempts = 2  # Number of retry attempts for stream interruptions
-            retry_count = 0
-            
-            while retry_count <= max_retry_attempts:
-                try:
-                    # If we're retrying, let the user know
-                    if retry_count > 0:
-                        logger.warning(f"Retrying stream request (attempt {retry_count}/{max_retry_attempts}) after interruption")
-                        print(f"\n[Retrying after connection interruption, attempt {retry_count}/{max_retry_attempts}]")
-                        # Add a small delay before retrying to allow network to recover
-                        time.sleep(2)
-                    
-                    stream_response = client.chat.completions.create(
-                        messages=messages,
-                        model=model,
-                        stream=True,
-                        # Set a reasonable timeout for each chunk
-                        timeout=60
-                    )
-                    
-                    # Process the stream with interruption detection
-                    print("Receiving streamed response:")
-                    chunk_count = 0
+            if stream:
+                # Streaming implementation
+                stream_response = client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    stream=True,
+                    timeout=60
+                )
+                
+                print("Receiving streamed response:")
+                chunk_count = 0
+                last_chunk_time = time.time()
+                full_response = ""  # Reset for this attempt
+                
+                for chunk in stream_response:
+                    chunk_count += 1
                     last_chunk_time = time.time()
                     
-                    for chunk in stream_response:
-                        # Track successful chunks for timeout detection
-                        chunk_count += 1
-                        last_chunk_time = time.time()
-                        
-                        # Extract content from the chunk
-                        if chunk.choices and chunk.choices[0].delta.content is not None:
-                            content = chunk.choices[0].delta.content
-                            full_response += content
-                            # Print the chunk content to the console
-                            print(content, end="", flush=True)
-                    
-                    # If we get here without exception, streaming completed successfully
-                    print()  # Add a newline after the streamed response
+                    if chunk.choices and chunk.choices[0].delta.content is not None:
+                        content = chunk.choices[0].delta.content
+                        full_response += content
+                        print(content, end="", flush=True)
+                
+                print()  # Add newline after streamed response
+                response = full_response
+                break  # Success, exit retry loop
+            
+            else:
+                # Non-streaming implementation
+                chat_completion = client.chat.completions.create(
+                    messages=messages,
+                    model=model,
+                    timeout=120
+                )
+                
+                response = chat_completion.choices[0].message.content
+                break  # Success, exit retry loop
+                
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            error_code = None
+            
+            # Try to extract HTTP status code if present
+            if hasattr(e, 'status_code'):
+                error_code = e.status_code
+            elif "503" in error_str:
+                error_code = 503
+            elif "429" in error_str:
+                error_code = 429
+            elif "500" in error_str:
+                error_code = 500
+            
+            # Check if this is a retryable error
+            is_connection_error = any(keyword in error_str for keyword in 
+                ["connection", "timeout", "peer closed", "reset", "eof", "broken pipe"])
+            
+            is_server_error = (error_code in [429, 500, 502, 503, 504]) or "server error" in error_str
+            
+            # Log the specific error type for debugging
+            if is_verbose:
+                if is_connection_error:
+                    print(f"Connection error detected: {error_str}")
+                if is_server_error:
+                    print(f"Server error detected (code: {error_code}): {error_str}")
+            
+            if (is_connection_error or is_server_error) and retry_count < max_retry_attempts:
+                # This is a retryable error and we haven't exceeded retry attempts
+                retry_count += 1
+                logger.warning(f"Retryable error encountered: {e}. Retry {retry_count}/{max_retry_attempts}")
+                
+                # For streaming, if we have partial results, we might want to continue from there
+                if stream and full_response:
+                    logger.info(f"Partial response of {len(full_response)} chars received before error")
+                    print(f"\n[Connection interrupted. Received {len(full_response)} chars so far. Retrying...]")
+                
+                continue  # Try again
+            else:
+                # Either not a retryable error or max retries exceeded
+                if retry_count > 0:
+                    logger.error(f"Failed after {retry_count} retries: {e}")
+                else:
+                    logger.error(f"Non-retryable error: {e}")
+                
+                # If streaming with partial response, use what we have
+                if stream and full_response:
+                    logger.warning(f"Using partial response of {len(full_response)} chars despite error")
+                    print("\n[Warning: Using partial response due to connection issues]")
+                    response = full_response
                     break
-                    
-                except Exception as e:
-                    error_str = str(e).lower()
-                    is_connection_error = any(keyword in error_str for keyword in 
-                        ["connection", "timeout", "peer closed", "reset", "eof", "broken pipe"])
-                    
-                    # If this looks like a network interruption and we have a partial response, retry
-                    if is_connection_error and full_response and retry_count < max_retry_attempts:
-                        logger.warning(f"Stream interrupted: {e}. Got {len(full_response)} chars so far. Retrying...")
-                        retry_count += 1
-                        # Continue to the next retry attempt
-                        continue
-                    else:
-                        # Either not a connection error, no partial response, or max retries exceeded
-                        if retry_count > 0:
-                            logger.error(f"Failed to complete streaming after {retry_count} retries: {e}")
-                        else:
-                            logger.error(f"Error during streaming: {e}")
-                        
-                        # If we have a partial response, use it rather than failing completely
-                        if full_response:
-                            logger.warning(f"Using partial response of {len(full_response)} chars despite error")
-                            print("\n[Warning: Using partial response due to connection interruption]")
-                            break
-                        else:
-                            # No usable response, raise the exception
-                            raise
-            
-            response = full_response
-        else:
-            # Non-streaming API call
-            chat_completion = client.chat.completions.create(
-                messages=messages,
-                model=model,
-                # Set a reasonable timeout for the entire request
-                timeout=120
-            )
-            
-            # Extract and return the response text
-            response = chat_completion.choices[0].message.content
-        
-        # Calculate and log response time in verbose mode
-        if is_verbose:
-            end_time = datetime.now()
-            duration = (end_time - start_time).total_seconds()
-            print(f"Received {'streamed ' if stream else ''}response from Groq API in {duration:.2f} seconds")
-            print(f"Response length: {len(response)} characters")
-            if len(response) > 500 and not stream:
-                # Show truncated response in verbose mode for readability (only if not streamed)
-                print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
-        
-        return response
-    except Exception as e:
-        if 'invalid_api_key' in str(e):
-            raise ValueError(
-                f"\nERROR: Invalid Groq API key. Please check your GROQ_API_KEY in the .env file.\n"
-                f"The key you provided starts with: {api_key[:4]}... (length: {len(api_key)})\n"
-                f"\nIf you recently created this key, it might take a few minutes to activate.\n"
-                f"\nOriginal error: {str(e)}"
-            )
-        else:
-            # Re-raise other exceptions
-            logger.error(f"Groq API call failed: {e}")
-            raise
+                else:
+                    # No response to use, raise the last error
+                    raise
+    
+    # If we've exhausted all retries and still don't have a response
+    if response is None and last_error is not None:
+        retry_time_total = sum(retry_delays[:retry_count])
+        logger.error(f"All retry attempts failed (after {retry_time_total}s total waiting time): {last_error}")
+        print(f"\n❌ API call failed after all retries. Total retry time: {retry_time_total}s. Error: {last_error}")
+        print("Exiting program due to persistent API failures.")
+        sys.exit(1)  # Exit with error code
+    
+    # Calculate and log response time in verbose mode
+    if is_verbose:
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        print(f"Received {'streamed ' if stream else ''}response from Groq API in {duration:.2f} seconds")
+        print(f"Response length: {len(response)} characters")
+        if len(response) > 500 and not stream:
+            # Show truncated response in verbose mode for readability (only if not streamed)
+            print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
+    
+    return response
 
 
 
@@ -452,104 +612,188 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
         api_key=api_key
     )
     
-    try:
-        # Call the OpenRouter API via OpenAI SDK
-        if is_verbose:
-            print("Sending request to OpenRouter API...")
-            start_time = datetime.now()
-        
-        # No extra headers needed for basic functionality
-        # OpenRouter will still work without site information
-        extra_headers = {}
-        
-        # Handle streaming differently if enabled
-        if stream:
-            full_response = ""
-            # Using streaming API
-            # Prepare messages list based on system prompt setting
-            messages = []
-            if use_system_prompt:
-                # Ensure critical anti-testing instruction is part of the system prompt
-                anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
-                if anti_testing_instruction not in system_prompt_content:
-                    system_prompt_content += anti_testing_instruction
-                messages.append({"role": "system", "content": system_prompt_content})
-            messages.append({"role": "user", "content": prompt})
-            
-            stream_response = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                stream=True,
-                extra_headers=extra_headers
-            )
-            
-            # Process the stream
-            print("Receiving streamed response:")
-            for chunk in stream_response:
-                # Extract content from the chunk
-                if chunk.choices and chunk.choices[0].delta.content is not None:
-                    content = chunk.choices[0].delta.content
-                    full_response += content
-                    # Print the chunk content to the console
-                    print(content, end="", flush=True)
-            
-            # Add a newline after the streamed response
-            print()
-            response = full_response
-        else:
-            # Non-streaming API call
-            # Prepare messages list based on system prompt setting
-            messages = []
-            if use_system_prompt:
-                # Ensure critical anti-testing instruction is part of the system prompt
-                anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
-                if anti_testing_instruction not in system_prompt_content:
-                    system_prompt_content += anti_testing_instruction
-                messages.append({"role": "system", "content": system_prompt_content})
-            messages.append({"role": "user", "content": prompt})
-
+    # Define fixed retry schedule as requested
+    max_retry_attempts = 3  # Total of 3 retries
+    retry_delays = [60, 120, 150]  # Exact delay in seconds for each retry
+    
+    # Try the API call with retries
+    retry_count = 0
+    last_error = None
+    response = None
+    full_response = ""  # For streaming mode
+    
+    while retry_count <= max_retry_attempts:
+        try:
+            # Call the OpenRouter API via OpenAI SDK
             if is_verbose:
-                print(f"Attempting with model: {model}")
+                print("Sending request to OpenRouter API...")
+                if retry_count > 0:
+                    print(f"\n[Retry {retry_count}/{max_retry_attempts}] Attempting API call...")
+                start_time = datetime.now()
             
-            chat_completion = client.chat.completions.create(
-                model=model,
-                messages=messages,
-                extra_headers=extra_headers
-            )
+            # Log retry attempts
+            if retry_count > 0:
+                logger.warning(f"Retrying OpenRouter API call (attempt {retry_count}/{max_retry_attempts})")
+                # Use fixed delay based on retry count
+                retry_delay = retry_delays[retry_count - 1]
+                print(f"Waiting {retry_delay} seconds before retry...")
+                time.sleep(retry_delay)
             
-            # Extract and return the response text
-            response = chat_completion.choices[0].message.content
+            # No extra headers needed for basic functionality
+            # OpenRouter will still work without site information
+            extra_headers = {}
+            
+            # Handle streaming differently if enabled
+            if stream:
+                full_response = ""
+                # Using streaming API
+                # Prepare messages list based on system prompt setting
+                messages = []
+                if use_system_prompt:
+                    # Ensure critical anti-testing instruction is part of the system prompt
+                    anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+                    if anti_testing_instruction not in system_prompt_content:
+                        system_prompt_content += anti_testing_instruction
+                    messages.append({"role": "system", "content": system_prompt_content})
+                messages.append({"role": "user", "content": prompt})
+                
+                stream_response = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    stream=True,
+                    extra_headers=extra_headers
+                )
+                
+                # Process the stream
+                print("Receiving streamed response:")
+                for chunk in stream_response:
+                    # Extract content from the chunk
+                    if chunk.choices and chunk.choices[0].delta.content is not None:
+                        content = chunk.choices[0].delta.content
+                        full_response += content
+                        # Print the chunk content to the console
+                        print(content, end="", flush=True)
+                
+                # Add a newline after the streamed response
+                print()
+                response = full_response
+            else:
+                # Non-streaming API call
+                # Prepare messages list based on system prompt setting
+                messages = []
+                if use_system_prompt:
+                    # Ensure critical anti-testing instruction is part of the system prompt
+                    anti_testing_instruction = " CRITICAL INSTRUCTION: You MUST NOT identify or discuss any form of software testing (unit, integration, E2E, etc.), testing frameworks, or test-related code unless explicitly and directly asked to do so for a specific task about testing itself. For all general analysis, summarization, or abstraction identification tasks, EXCLUDE ALL TESTING-RELATED CONTENT."
+                    if anti_testing_instruction not in system_prompt_content:
+                        system_prompt_content += anti_testing_instruction
+                    messages.append({"role": "system", "content": system_prompt_content})
+                messages.append({"role": "user", "content": prompt})
+
+                if is_verbose:
+                    print(f"Attempting with model: {model}")
+                
+                chat_completion = client.chat.completions.create(
+                    model=model,
+                    messages=messages,
+                    extra_headers=extra_headers
+                )
+                
+                # Extract and return the response text
+                response = chat_completion.choices[0].message.content
+            
+            # Success - exit retry loop
+            break
+            
+        except Exception as e:
+            last_error = e
+            error_str = str(e).lower()
+            error_code = None
+            
+            # Try to extract HTTP status code if present
+            if hasattr(e, 'status_code'):
+                error_code = e.status_code
+            elif any(code in error_str for code in ["503", "429", "500", "502", "504"]):
+                # Extract status code if present in error message
+                for code in ["503", "429", "500", "502", "504"]:
+                    if code in error_str:
+                        error_code = int(code)
+                        break
+            
+            # Check if this is a retryable error
+            is_connection_error = any(keyword in error_str for keyword in 
+                ["connection", "timeout", "peer closed", "reset", "eof", "broken pipe"])
+            
+            is_server_error = (error_code in [429, 500, 502, 503, 504]) or "server error" in error_str
+            
+            # Log the specific error type for debugging
+            if is_verbose:
+                if is_connection_error:
+                    print(f"Connection error detected: {error_str}")
+                if is_server_error:
+                    print(f"Server error detected (code: {error_code}): {error_str}")
+            
+            if (is_connection_error or is_server_error) and retry_count < max_retry_attempts:
+                # This is a retryable error and we haven't exceeded retry attempts
+                retry_count += 1
+                logger.warning(f"Retryable error encountered: {e}. Retry {retry_count}/{max_retry_attempts}")
+                
+                # For streaming, if we have partial results, we might want to continue from there
+                if stream and full_response:
+                    logger.info(f"Partial response of {len(full_response)} chars received before error")
+                    print(f"\n[Connection interrupted. Received {len(full_response)} chars so far. Retrying...]")
+                
+                continue  # Try again
+            elif 'invalid_api_key' in error_str or 'authentication' in error_str.lower():
+                raise ValueError(
+                    f"\nERROR: Invalid OpenRouter API key. Please check your OPENROUTER_API_KEY in the .env file.\n"
+                    f"The key you provided starts with: {api_key[:4]}... (length: {len(api_key)})\n"
+                    f"\nOriginal error: {str(e)}"
+                )
+            elif 'model_not_found' in error_str or ('model' in error_str.lower() and 'not' in error_str.lower()):
+                raise ValueError(
+                    f"\nERROR: Model '{model}' not found or not available. Please check your OPENROUTER_MODEL in the .env file.\n"
+                    f"\nOriginal error: {str(e)}"
+                )
+            else:
+                # Non-retryable error
+                if retry_count > 0:
+                    logger.error(f"Failed after {retry_count} retries: {e}")
+                else:
+                    logger.error(f"Non-retryable error: {e}")
+                
+                # If streaming with partial response, use what we have
+                if stream and full_response:
+                    logger.warning(f"Using partial response of {len(full_response)} chars despite error")
+                    print("\n[Warning: Using partial response due to connection issues]")
+                    response = full_response
+                    break
+                else:
+                    # No response to use, raise the last error
+                    raise
+    
+    # If we've exhausted all retries and still don't have a response
+    if response is None and last_error is not None:
+        retry_time_total = sum(retry_delays[:retry_count])
+        logger.error(f"All retry attempts failed (after {retry_time_total}s total waiting time): {last_error}")
+        print(f"\n❌ API call failed after all retries. Total retry time: {retry_time_total}s. Error: {last_error}")
+        print("Exiting program due to persistent API failures.")
+        sys.exit(1)  # Exit with error code
+            
+    # Calculate and log response time in verbose mode
+    if is_verbose:
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+        print(f"Received {'streamed ' if stream else ''}response from OpenRouter API in {duration:.2f} seconds")
+        # Log which model was actually used if not streaming (not available in streaming response)
+        if not stream and hasattr(chat_completion, 'model'):
+            print(f"Model used: {chat_completion.model}")
         
-        # Calculate and log response time in verbose mode
-        if is_verbose:
-            end_time = datetime.now()
-            duration = (end_time - start_time).total_seconds()
-            print(f"Received {'streamed ' if stream else ''}response from OpenRouter API in {duration:.2f} seconds")
-            # Log which model was actually used if not streaming (not available in streaming response)
-            if not stream and hasattr(chat_completion, 'model'):
-                print(f"Model used: {chat_completion.model}")
-            
-            print(f"Response length: {len(response)} characters")
-            if len(response) > 500 and not stream:
-                # Show truncated response in verbose mode for readability (only if not streamed)
-                print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
-        
-        return response
-    except Exception as e:
-        if 'invalid_api_key' in str(e) or 'authentication' in str(e).lower():
-            raise ValueError(
-                f"\nERROR: Invalid OpenRouter API key. Please check your OPENROUTER_API_KEY in the .env file.\n"
-                f"The key you provided starts with: {api_key[:4]}... (length: {len(api_key)})\n"
-                f"\nOriginal error: {str(e)}"
-            )
-        elif 'model_not_found' in str(e) or 'model' in str(e).lower() and 'not' in str(e).lower():
-            raise ValueError(
-                f"\nERROR: Model '{model}' not found or not available. Please check your OPENROUTER_MODEL in the .env file.\n"
-                f"\nOriginal error: {str(e)}"
-            )
-        else:
-            # Re-raise other exceptions
-            raise
+        print(f"Response length: {len(response)} characters")
+        if len(response) > 500 and not stream:
+            # Show truncated response in verbose mode for readability (only if not streamed)
+            print(f"Truncated response preview: {response[:250]}...{response[-250:]}")
+    
+    return response
 
 if __name__ == "__main__":
     test_prompt = "Hello, how are you?"

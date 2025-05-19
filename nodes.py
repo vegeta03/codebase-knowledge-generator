@@ -7,7 +7,8 @@ from utils.call_llm import call_llm, repair_llm_json
 from utils.crawl_local_files import crawl_local_files
 from utils.code_chunking import chunk_codebase
 from utils.chunk_processor import process_code_for_llm, batch_process_chunks, estimate_model_calls
-from prompts import get_identify_abstractions_prompt
+from prompts import get_identify_abstractions_prompt, get_write_chapter_prompt, get_analyze_relationships_prompt
+import logging
 
 # Helper to get content for specific file indices
 def get_content_for_indices(files_data, indices):
@@ -241,7 +242,7 @@ class IdentifyAbstractions(Node):
     def _fix_malformed_json(self, json_str: str) -> str:
         """
         Fix common JSON syntax errors that might appear in LLM responses.
-        This is a basic fix function that delegates to the more comprehensive repair_llm_json.
+        This delegates to the comprehensive repair_llm_json function.
         
         Args:
             json_str: The potentially malformed JSON string
@@ -317,6 +318,28 @@ class IdentifyAbstractions(Node):
                             # Print first 100 chars of the problematic JSON for debugging
                             print(f"Problematic JSON (first 100 chars): {abstractions_json[:100]}...")
                             
+                            # First try our comprehensive repair function from utils
+                            from utils.call_llm import repair_llm_json
+                            try:
+                                repaired_json = repair_llm_json(abstractions_json)
+                                try:
+                                    # Try to parse with the repaired JSON
+                                    chunk_abstractions = json5.loads(repaired_json)
+                                    print(f"Successfully repaired JSON with comprehensive repair function")
+                                    # Continue with the repaired abstractions
+                                except Exception as final_error:
+                                    print(f"FATAL ERROR: All JSON repair attempts failed!")
+                                    print(f"Original error: {json5_error}")
+                                    print(f"Final error: {final_error}")
+                                    print(f"JSON sample: {repaired_json[:200]}...")
+                                    print(f"Exiting program because JSON parsing failed completely.")
+                                    import sys
+                                    sys.exit(1)
+                            except Exception as repair_error:
+                                print(f"Error with repair function: {repair_error}")
+                                print("Falling back to manual repair attempts...")
+                            
+                            # If we get here, try manual salvage approaches
                             # Try to salvage the JSON by manually reconstructing it
                             chunk_abstractions = []
                             
@@ -333,6 +356,37 @@ class IdentifyAbstractions(Node):
                                 # Even more liberal pattern as last resort
                                 pattern = r'"name"\s*:\s*"([^"]*)".*?"description"\s*:\s*"([^"]*)".*?"file_indices"\s*:\s*\[(.*?)\]'
                                 matches = re.findall(pattern, abstractions_json, re.DOTALL)
+                                
+                            # Check if we have nested object in description - special case for LLM outputs
+                            if not matches:
+                                # Look for JSON objects where description is an object not a string
+                                nested_pattern = r'\{\s*"name"\s*:\s*"([^"]*)"\s*,\s*"description"\s*:\s*(\{[^}]*\})\s*,\s*"file_indices"\s*:\s*\[(.*?)\]\s*\}'
+                                nested_matches = re.findall(nested_pattern, abstractions_json, re.DOTALL)
+                                
+                                if nested_matches:
+                                    print("Found nested objects in description field - flattening")
+                                    for match in nested_matches:
+                                        name, desc_obj, indices_str = match
+                                        # Convert the nested object to a string representation
+                                        # Basic sanitization
+                                        desc_str = str(desc_obj).replace('"', '\\"').replace('\n', ' ')
+                                        
+                                        # Parse the indices
+                                        indices = []
+                                        # Look for any quoted strings in the indices part
+                                        for idx in re.findall(r'"([^"]*)"', indices_str):
+                                            indices.append(idx)
+                                        
+                                        # If we didn't find any quoted indices, try to extract numbers directly
+                                        if not indices:
+                                            for idx in re.findall(r'\d+', indices_str):
+                                                indices.append(idx)
+                                                
+                                        chunk_abstractions.append({
+                                            "name": name,
+                                            "description": desc_str,
+                                            "file_indices": indices
+                                        })
                             
                             for match in matches:
                                 name, description, indices_str = match
@@ -368,9 +422,20 @@ class IdentifyAbstractions(Node):
                                             current_obj["name"] = name_match.group(1)
                                     
                                     elif '"description"' in line:
-                                        desc_match = re.search(r'"description"\s*:\s*"([^"]*)"', line)
-                                        if desc_match:
-                                            current_obj["description"] = desc_match.group(1)
+                                        # Check for object-style description
+                                        if '{' in line and '}' in line:
+                                            # Nested object description, flatten it
+                                            start_idx = line.find('{')
+                                            end_idx = line.rfind('}') + 1
+                                            if start_idx >= 0 and end_idx > start_idx:
+                                                obj_desc = line[start_idx:end_idx]
+                                                # Sanitize
+                                                current_obj["description"] = obj_desc.replace('"', '\\"')
+                                        else:
+                                            # Normal string description
+                                            desc_match = re.search(r'"description"\s*:\s*"([^"]*)"', line)
+                                            if desc_match:
+                                                current_obj["description"] = desc_match.group(1)
                                     
                                     elif '"file_indices"' in line:
                                         # Start collecting file indices
@@ -391,7 +456,12 @@ class IdentifyAbstractions(Node):
                             if chunk_abstractions:
                                 print(f"Successfully salvaged {len(chunk_abstractions)} abstractions with aggressive repair")
                             else:
-                                raise Exception("Unable to salvage JSON even with aggressive repair")
+                                # If we've reached here, all attempts to parse the JSON have failed
+                                print("FATAL ERROR: Unable to salvage JSON even with aggressive repair")
+                                print(f"Problematic chunk ID: {chunk_id}")
+                                print(f"Exiting program because JSON repair failed completely.")
+                                import sys
+                                sys.exit(1)
                     
                     # Log the number of abstractions found in this chunk
                     abstraction_count = len(chunk_abstractions)
@@ -525,9 +595,10 @@ class IdentifyAbstractions(Node):
             print("=" * 40)
             
         except Exception as e:
-            print(f"Error processing abstraction results: {e}")
-            # Return empty list in case of failure
-            combined_abstractions = []
+            print(f"FATAL ERROR: Error processing abstraction results: {e}")
+            print("Exiting program because JSON processing failed completely.")
+            import sys
+            sys.exit(1)
         
         # Validate abstractions structure
         validated_abstractions = []
@@ -808,54 +879,16 @@ class AnalyzeRelationships(Node):
             lang_hint = f" (in {language.capitalize()})"
             list_lang_note = f" (Names might be in {language.capitalize()})"  # Note for the input list
 
-        prompt = f"""
-Based on the following abstractions and relevant code snippets from the project `{project_name}`:
-
-List of Abstraction Indices and Names{list_lang_note}:
-{abstraction_listing}
-
-Context (Abstractions, Descriptions, Code):
-{context}
-
-{language_instruction}Please provide:
-1. A high-level `summary` of the project's main purpose and functionality in a short "technical" and "computer science" friendly sentences{lang_hint}. Use markdown formatting with **bold** and *italic* text to highlight important concepts.
-2. A list (`relationships`) describing the key interactions between these abstractions. For each relationship, specify:
-    - `from_abstraction`: Index of the source abstraction (e.g., `0 # AbstractionName1`)
-    - `to_abstraction`: Index of the target abstraction (e.g., `1 # AbstractionName2`)
-    - `label`: A brief label for the interaction **in just a few words**{lang_hint} (e.g., "Manages", "Inherits", "Uses").
-    Ideally the relationship should be backed by one abstraction calling or passing parameters to another.
-    Make the relationship Simple but don't dilute it while doing so and exclude those non-important ones.
-
-IMPORTANT INSTRUCTIONS:
-1. Make sure EVERY abstraction is involved in at least ONE relationship (either as source or target).
-2. Each abstraction index must appear at least once across all relationships.
-3. Use ONLY the abstraction indices (0 to {num_abstractions-1}) from the list above, NOT file indices.
-4. Do NOT use file indices or project names in the relationships.
-5. The indices in from_abstraction and to_abstraction must be between 0 and {num_abstractions-1} inclusive.
-
-Format the output as JSON5:
-
-```json5
-{{
-  "summary": "A brief, simple explanation of the project{lang_hint}. Can span multiple lines with **bold** and *italic* for emphasis. IMPORTANT: This must be a single string value, not multiple strings.",
-  "relationships": [
-    {{
-      "from_abstraction": "0 # AbstractionName1",
-      "to_abstraction": "1 # AbstractionName2",
-      "label": "Manages{lang_hint}"
-    }},
-    {{
-      "from_abstraction": "2 # AbstractionName3",
-      "to_abstraction": "0 # AbstractionName1",
-      "label": "Provides config{lang_hint}"
-    }}
-    // ... other relationships
-  ]
-}}
-```
-
-Now, provide the JSON5 output:
-"""
+        prompt = get_analyze_relationships_prompt(
+            project_name=project_name,
+            abstraction_listing=abstraction_listing,
+            context=context,
+            num_abstractions=num_abstractions,
+            language_instruction=language_instruction,
+            lang_hint=lang_hint,
+            list_lang_note=list_lang_note
+        )
+        
         response = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
 
         # --- Validation ---
@@ -1023,25 +1056,174 @@ Now, provide the JSON5 output:
                         }
                     )
 
+        # --- PHASE 1: Identify disconnected abstractions ---
         # Check if all abstractions are involved in at least one relationship
         involved_abstractions = set()
         for rel in validated_relationships:
             involved_abstractions.add(rel["from"])
             involved_abstractions.add(rel["to"])
 
-        # If any abstractions are missing, add relationships to ensure all are included
-        for i in range(num_abstractions):
-            if i not in involved_abstractions:
-                print(f"Warning: Abstraction {i} is not involved in any relationship. Adding a default relationship.")
-                # Add a relationship from this abstraction to the next one (or the first one if this is the last)
-                if num_abstractions > 1:
-                    to_idx = (i + 1) % num_abstractions
+        # Find abstractions with no relationships
+        disconnected_abstractions = [i for i in range(num_abstractions) if i not in involved_abstractions]
+        
+        # If we have disconnected abstractions, we need a second phase
+        if disconnected_abstractions:
+            print(f"\n=== PHASE 2: GENERATING MEANINGFUL RELATIONSHIPS FOR {len(disconnected_abstractions)} DISCONNECTED ABSTRACTIONS ===")
+            
+            # --- PHASE 2: Generate meaningful relationships for disconnected abstractions ---
+            # Extract abstraction details for disconnected and connected abstractions
+            from prompts import get_abstraction_relationship_completion_prompt
+            
+            # Convert abstraction listing to a dictionary for easier lookup
+            abstraction_dict = {}
+            for line in abstraction_listing.split('\n'):
+                if line.strip():
+                    parts = line.strip().split('#', 1)
+                    if len(parts) == 2:
+                        idx = parts[0].strip()
+                        name = parts[1].strip()
+                        abstraction_dict[idx] = name
+            
+            # Get names for disconnected abstractions
+            disconnected_names = []
+            for idx in disconnected_abstractions:
+                name = abstraction_dict.get(str(idx), f"Abstraction {idx}")
+                disconnected_names.append(f"{idx} # {name}")
+            
+            # Get existing relationships as context
+            existing_relationships = []
+            for rel in validated_relationships:
+                from_idx = rel["from"]
+                to_idx = rel["to"]
+                from_name = abstraction_dict.get(str(from_idx), f"Abstraction {from_idx}")
+                to_name = abstraction_dict.get(str(to_idx), f"Abstraction {to_idx}")
+                existing_relationships.append(f"- {from_idx} # {from_name} → {to_idx} # {to_name}: {rel['label']}")
+            
+            # Build a completion prompt for each disconnected abstraction
+            completion_prompt = f"""
+Based on the abstractions in the project and the existing relationships already identified, 
+please generate SPECIFIC and LOGICAL relationships for these disconnected abstractions.
+
+For each disconnected abstraction, create at least one relationship connecting it to another abstraction.
+The relationship must be conceptually valid and reflect a real architectural connection.
+
+Disconnected abstractions:
+{chr(10).join(f"- {name}" for name in disconnected_names)}
+
+Context from other abstractions:
+{abstraction_listing}
+
+Existing relationships:
+{chr(10).join(existing_relationships)}
+
+IMPORTANT:
+1. Create only meaningful, logical relationships based on the likely roles of these abstractions
+2. Each relationship must connect a disconnected abstraction to EITHER another disconnected abstraction OR an already-connected one
+3. Use technology-agnostic concepts (dependence, composition, uses, specializes, etc.)
+4. Be specific about the relationship type, not just general "relates to"
+
+Output format should be a JSON array of objects with:
+- from_abstraction: The source abstraction index and name
+- to_abstraction: The target abstraction index and name  
+- label: A descriptive relationship label
+
+```json
+[
+  {{
+    "from_abstraction": "{disconnected_abstractions[0]} # {abstraction_dict.get(str(disconnected_abstractions[0]), 'Disconnected Abstraction')}",
+    "to_abstraction": "1 # {abstraction_dict.get('1', 'Some Connected Abstraction')}",
+    "label": "Depends on for configuration"
+  }},
+  // Add relationships for all disconnected abstractions
+]
+```
+"""
+            
+            # Call LLM to generate meaningful relationships for disconnected abstractions
+            completion_response = call_llm(completion_prompt, use_cache=False)  # Never use cache for this
+            
+            # Parse the completion response
+            try:
+                # Extract JSON from the response using our helper function
+                completion_json = self._extract_json_from_response(completion_response)
+                
+                # Fix common JSON syntax errors in the LLM response
+                completion_json = self._fix_malformed_json(completion_json)
+                
+                # Parse the JSON
+                new_relationships = json5.loads(completion_json)
+                
+                # Validate and add new relationships
+                for rel in new_relationships:
+                    try:
+                        # Extract indices
+                        from_str = str(rel["from_abstraction"]).strip()
+                        if "#" in from_str:
+                            from_idx = int(from_str.split("#")[0].strip())
+                        else:
+                            from_idx = int(from_str)
+                            
+                        to_str = str(rel["to_abstraction"]).strip()
+                        if "#" in to_str:
+                            to_idx = int(to_str.split("#")[0].strip())
+                        else:
+                            to_idx = int(to_str)
+                        
+                        # Ensure indices are valid
+                        if 0 <= from_idx < num_abstractions and 0 <= to_idx < num_abstractions:
+                            # Add the new relationship
+                            validated_relationships.append({
+                                "from": from_idx,
+                                "to": to_idx,
+                                "label": rel["label"]
+                            })
+                            
+                            # Update the set of involved abstractions
+                            involved_abstractions.add(from_idx)
+                            involved_abstractions.add(to_idx)
+                            
+                            print(f"Added relationship: {from_idx} ({abstraction_dict.get(str(from_idx), '')}) → {to_idx} ({abstraction_dict.get(str(to_idx), '')}): {rel['label']}")
+                        else:
+                            print(f"Warning: Invalid indices in generated relationship: {from_idx}, {to_idx}")
+                    except (ValueError, KeyError, TypeError) as e:
+                        print(f"Warning: Error processing generated relationship: {rel}. Error: {e}")
+            except Exception as e:
+                print(f"Warning: Failed to process generated relationships: {e}")
+                # Proceed with fallback relationships
+
+        # --- PHASE 3: Final check and fallback for any remaining disconnected abstractions ---
+        # Recheck for any abstractions still disconnected
+        disconnected_abstractions = [i for i in range(num_abstractions) if i not in involved_abstractions]
+        
+        # If we still have disconnected abstractions, add simple fallback relationships
+        if disconnected_abstractions:
+            print(f"\n=== PHASE 3: ADDING FALLBACK RELATIONSHIPS FOR {len(disconnected_abstractions)} REMAINING DISCONNECTED ABSTRACTIONS ===")
+            
+            # Find a suitable connection target - prefer a central/common abstraction if possible
+            connection_counts = {}
+            for rel in validated_relationships:
+                connection_counts[rel["from"]] = connection_counts.get(rel["from"], 0) + 1
+                connection_counts[rel["to"]] = connection_counts.get(rel["to"], 0) + 1
+            
+            # Find the most connected abstraction to use as a hub (if there are any relationships)
+            hub_abstraction = None
+            if connection_counts:
+                hub_abstraction = max(connection_counts, key=connection_counts.get)
+            
+            for i in disconnected_abstractions:
+                # If we have a hub, connect to it; otherwise connect to the next abstraction
+                if hub_abstraction is not None:
+                    to_idx = hub_abstraction
+                    connection_type = "Integrates with"
                 else:
-                    to_idx = i  # Self-reference if only one abstraction
+                    to_idx = (i + 1) % num_abstractions
+                    connection_type = "Relates to" if i != to_idx else "Self-manages"
+                
+                print(f"Warning: Abstraction {i} still disconnected. Adding fallback relationship to {to_idx}.")
                 validated_relationships.append({
                     "from": i,
                     "to": to_idx,
-                    "label": "Relates to"  # Default generic label
+                    "label": connection_type
                 })
 
         print("Generated project summary and relationship details.")
@@ -1489,55 +1671,27 @@ class WriteChapters(BatchNode):
             )
             tone_note = f" (appropriate for {lang_cap} readers)"
 
+        # Use the comprehensive prompt template from prompts.py instead of the hardcoded one
+        prompt = get_write_chapter_prompt(
+            project_name=project_name,
+            chapter_num=chapter_num,
+            abstraction_name=abstraction_name,
+            abstraction_description=abstraction_description,
+            full_chapter_listing=item["full_chapter_listing"],
+            file_context_str=file_context_str if file_context_str else "No specific code snippets provided for this abstraction.",
+            previous_chapters_summary=previous_chapters_summary if previous_chapters_summary else "This is the first chapter.",
+            language_instruction=language_instruction,
+            concept_details_note=concept_details_note,
+            structure_note=structure_note,
+            prev_summary_note=prev_summary_note,
+            instruction_lang_note=instruction_lang_note,
+            mermaid_lang_note=mermaid_lang_note,
+            code_comment_note=code_comment_note,
+            link_lang_note=link_lang_note,
+            tone_note=tone_note,
+            language=language
+        )
 
-        prompt = f"""
-{language_instruction}Write a software developer friendly tutorial chapter (in Markdown format) for the project `{project_name}` about the concept: "{abstraction_name}". This is Chapter {chapter_num}.
-
-Concept Details{concept_details_note}:
-- Name: {abstraction_name}
-- Description:
-{abstraction_description}
-
-Complete Tutorial Structure{structure_note}:
-{item["full_chapter_listing"]}
-
-Context from previous chapters{prev_summary_note}:
-{previous_chapters_summary if previous_chapters_summary else "This is the first chapter."}
-
-Relevant Code Snippets (Code itself remains unchanged):
-{file_context_str if file_context_str else "No specific code snippets provided for this abstraction."}
-
-Instructions for the chapter (Generate content in {language.capitalize()} unless specified otherwise):
-- Start with a clear heading (e.g., `# Chapter {chapter_num}: {abstraction_name}`). Use the provided concept name.
-
-- If this is not the first chapter, begin with a brief transition from the previous chapter{instruction_lang_note}, referencing it with a proper Markdown link using its name{link_lang_note}.
-
-- Begin with a high-level motivation explaining what problem this abstraction solves{instruction_lang_note}. Start with a central use case as a concrete example. The whole chapter should guide the reader to understand how to solve this use case. Make it very comprehensive and very understandable to a Senior Software Developer.
-
-- If the abstraction is complex, break it down into key concepts. Explain each concept one-by-one in a very beginner-friendly way{instruction_lang_note}.
-
-- Explain how to use this abstraction to solve the use case{instruction_lang_note}. Give example inputs and outputs for code snippets (if the output isn't values, describe at a high level what will happen{instruction_lang_note}).
-
-- Each code block should be COMPLETE! If longer code blocks are needed, break them down into smaller pieces and walk through them one-by-one. Make the code Simple however don't loose clarity. Use comments{code_comment_note} to skip non-important implementation details. Each code block should have a senior software developer friendly explanation right after it{instruction_lang_note}.
-
-- Describe the internal implementation to help understand what's under the hood{instruction_lang_note}. First provide a non-code or code-light walkthrough on what happens step-by-step when the abstraction is called{instruction_lang_note}. It's recommended to use a simple sequence diagram with mermaid syntax (`sequenceDiagram`) with a dummy example - keep it minimal with at least 5 participants to ensure clarity. If participant name has space, use: `participant QP as Query Processing`. ALWAYS use proper mermaid syntax with `sequenceDiagram` at the beginning and the correct arrow syntax (e.g., use `->>` for messages, NOT `->`). Example: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n```{mermaid_lang_note}.
-
-- Then dive deeper into code for the internal implementation with references to files. Provide example code blocks, but make them similarly simple however don't dilute it, and "Computer Science"-friendly. Explain{instruction_lang_note}.
-
-- IMPORTANT: When you need to refer to other core abstractions covered in other chapters, ALWAYS use proper Markdown links like this: [Chapter Title](filename.md). Use the Complete Tutorial Structure above to find the correct filename and the chapter title{link_lang_note}. Translate the surrounding text.
-
-- Use mermaid diagrams to illustrate complex concepts with PROPER mermaid syntax. ALWAYS begin with the diagram type (e.g., `sequenceDiagram`, `flowchart LR`, `classDiagram`, etc.) and use the correct syntax for that diagram type. For sequence diagrams, use proper arrow syntax like `->>`, `-->>`, `-->`, etc. NOT just `->`. For flowcharts, use proper node and connection syntax. Example with correct syntax: ```mermaid\nsequenceDiagram\n    participant A as ComponentA\n    participant B as ComponentB\n    A->>B: Request\n    B->>A: Response\n``` {mermaid_lang_note}.
-
-- Heavily use real-world and practical analogies and examples throughout{instruction_lang_note} to help a Senior Software Developer understand.
-
-- End the chapter with a brief conclusion that summarizes what was learned{instruction_lang_note} and provides a transition to the next chapter{instruction_lang_note}. If there is a next chapter, use a proper Markdown link: [Next Chapter Title](next_chapter_filename){link_lang_note}.
-
-- Ensure the tone is welcoming and easy for a seasoned sofware developer professional to understand{tone_note}.
-
-- Output *only* the Markdown content for this chapter.
-
-Now, directly provide a "technical" and "Computer Science"-friendly Markdown output (DON'T need ```markdown``` tags):
-"""
         chapter_content = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
 
         # Clean the chapter content to remove <think></think> blocks
@@ -1568,6 +1722,93 @@ Now, directly provide a "technical" and "Computer Science"-friendly Markdown out
         del self.chapters_written_so_far
         print(f"Finished writing {len(exec_res_list)} chapters.")
         return "default"
+
+    def _clean_llm_response(self, response: str) -> str:
+        """
+        Clean LLM response by removing <think></think> tags and other artifacts.
+        
+        Args:
+            response: The raw LLM response to clean
+            
+        Returns:
+            Cleaned response with thinking tags removed
+        """
+        # Remove <think>...</think> blocks
+        import re
+        clean_response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+        
+        # Remove possible trailing/leading whitespace from the cleaning
+        clean_response = clean_response.strip()
+        
+        # If the response is now empty (entire response was inside think tags), 
+        # return the original (this shouldn't happen with proper LLM behavior)
+        if not clean_response and response:
+            print("Warning: Entire response was inside <think> tags. Using original response.")
+            return response
+            
+        return clean_response
+
+    def exec_fallback(self, item, exc):
+        """
+        Provide a fallback chapter when the LLM API fails after all retries.
+        
+        Args:
+            item: The preparation result containing chapter information
+            exc: The exception that occurred
+            
+        Returns:
+            A placeholder chapter as fallback content
+        """
+        print(f"API call failed after all retries. Creating fallback chapter. Error: {exc}")
+        logger = logging.getLogger("llm_logger")
+        logger.error(f"Creating fallback chapter due to API failure: {exc}")
+        
+        # Extract necessary information to create a basic placeholder chapter
+        chapter_num = item["chapter_num"]
+        abstraction_name = item["abstraction_details"]["name"]
+        abstraction_description = item["abstraction_details"]["description"]
+        
+        # Get next chapter info for link
+        next_chapter_link = ""
+        if item.get("next_chapter"):
+            next_name = item["next_chapter"]["name"]
+            next_filename = item["next_chapter"]["filename"]
+            next_chapter_link = f"\n\nNext: [{next_name}]({next_filename})"
+        
+        # Create a simple fallback chapter with basic structure
+        fallback_chapter = f"""# Chapter {chapter_num}: {abstraction_name}
+
+> **Note:** This is a placeholder chapter. The full content couldn't be generated due to a temporary service interruption. Please try regenerating the tutorial later.
+
+## Overview
+
+{abstraction_description}
+
+## Basic Implementation
+
+This section would typically contain implementation details for the {abstraction_name} abstraction.
+
+## Key Concepts
+
+- Concept 1: Would explain core functionality
+- Concept 2: Would detail design patterns used
+- Concept 3: Would cover architectural considerations
+
+## Usage Examples
+
+Examples of how to use this abstraction would be included here.
+
+## Conclusion
+
+The {abstraction_name} abstraction is an important part of the system architecture. It provides essential functionality and integrates with other components.{next_chapter_link}
+
+---
+
+Generated by [AI Codebase Knowledge Generator](https://github.com/vegeta03/codebase-knowledge-generator)
+"""
+        
+        print(f"Created fallback chapter for Chapter {chapter_num}: {abstraction_name}")
+        return fallback_chapter
 
 class CombineTutorial(Node):
     def prep(self, shared):

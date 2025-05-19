@@ -6,6 +6,28 @@ import os
 import argparse
 import logging
 
+# Helper function to handle emoji printing in Windows consoles
+def safe_print(text):
+    """
+    Print text safely to console, handling Unicode/emoji encoding issues on Windows.
+    Falls back to ASCII-friendly alternatives when Unicode fails.
+    """
+    # Define ASCII fallbacks for emoji characters
+    emoji_fallbacks = {
+        "ℹ️": "[INFO]",
+        "⚠️": "[WARNING]",
+        "🛑": "[STOPPED]"
+    }
+    
+    try:
+        # Try printing with original text
+        print(text)
+    except UnicodeEncodeError:
+        # Replace emojis with ASCII alternatives
+        for emoji, fallback in emoji_fallbacks.items():
+            text = text.replace(emoji, fallback)
+        print(text)
+
 # Import the keyboard handler to enable Ctrl+C key termination
 from utils.keyboard_handler import setup_exit_handler
 
@@ -151,7 +173,7 @@ def main():
         tutorial_flow.run(shared)
     except KeyboardInterrupt:
         logger.info("Process interrupted by keyboard")
-        print("\n🛑 Process interrupted. Shutting down...")
+        safe_print("\n🛑 Process interrupted. Shutting down...")
     except Exception as e:
         logger.error(f"Error in main execution: {str(e)}")
         raise
