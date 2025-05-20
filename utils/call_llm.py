@@ -5,6 +5,12 @@ from datetime import datetime
 import time
 import re
 
+# Set up httpx logging based on the root logger
+httpx_logger = logging.getLogger("httpx")
+
+# By default, set httpx to WARNING level (will be adjusted later based on verbose mode)
+httpx_logger.setLevel(logging.WARNING)
+
 # Import json5 for more lenient JSON parsing
 try:
     import json5
@@ -321,11 +327,13 @@ def call_llm(prompt: str, use_cache: bool = False) -> str:
     try:
         if model_provider == "openrouter":
             model = os.getenv("OPENROUTER_MODEL", "google/gemini-2.0-flash-exp:free")
-            print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
+            if is_verbose:
+                print(f"🔄 LLM API Call: Provider=[OpenRouter] Model=[{model}] Stream=[{stream}]")
             response_text = _call_openrouter(prompt, stream=stream)
         else:  # Default to groq
             model = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
-            print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
+            if is_verbose:
+                print(f"🔄 LLM API Call: Provider=[Groq] Model=[{model}] Stream=[{stream}]")
             response_text = _call_groq(prompt, stream=stream)
         
         if is_verbose:
@@ -381,6 +389,10 @@ def _call_groq(prompt: str, stream: bool = False) -> str:
     # Check if verbose mode is enabled
     root_logger = logging.getLogger()
     is_verbose = root_logger.level <= logging.DEBUG
+    
+    # Set httpx logging level based on verbose mode
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.DEBUG if is_verbose else logging.WARNING)
     
     # Get API key and model from environment variables
     api_key = os.getenv("GROQ_API_KEY", "")
@@ -578,6 +590,10 @@ def _call_openrouter(prompt: str, stream: bool = False) -> str:
     # Check if verbose mode is enabled
     root_logger = logging.getLogger()
     is_verbose = root_logger.level <= logging.DEBUG
+    
+    # Set httpx logging level based on verbose mode
+    httpx_logger = logging.getLogger("httpx")
+    httpx_logger.setLevel(logging.DEBUG if is_verbose else logging.WARNING)
     
     # Get API key and model from environment variables
     api_key = os.getenv("OPENROUTER_API_KEY", "")

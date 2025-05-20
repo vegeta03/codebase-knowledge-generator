@@ -197,9 +197,15 @@ class IdentifyAbstractions(Node):
         return clean_response
     
     def _extract_json_from_response(self, response: str) -> str:
-        """Extract the JSON part from the LLM response."""
-        # With the improved prompt, the entire response should be a JSON5 array
-        # Strip any potential Markdown code blocks or extra text
+        """
+        Extract JSON content from an LLM response.
+        
+        Args:
+            response: The LLM response, potentially containing JSON code blocks
+            
+        Returns:
+            The extracted JSON as a string
+        """
         import re
         
         # First, clean any thinking tags from the response
@@ -836,6 +842,20 @@ class AnalyzeRelationships(Node):
                 
         # Last resort: return the cleaned response
         return response.strip()
+
+    def _fix_malformed_json(self, json_str: str) -> str:
+        """
+        Fix common JSON syntax errors that might appear in LLM responses.
+        This delegates to the comprehensive repair_llm_json function.
+        
+        Args:
+            json_str: The potentially malformed JSON string
+            
+        Returns:
+            Fixed JSON string that should be parseable
+        """
+        # Use the comprehensive repair function from call_llm module
+        return repair_llm_json(json_str)
 
     def exec(self, prep_res):
         (

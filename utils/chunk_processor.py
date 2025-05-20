@@ -187,8 +187,17 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
     # For now, just process sequentially
     results = []
     
-    logger.info(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
-               f" (using cache: {use_cache}, max_retries: {max_retries})")
+    # Check if verbose mode is enabled
+    root_logger = logging.getLogger()
+    is_verbose = root_logger.level <= logging.DEBUG
+    
+    # Log processing info at appropriate level
+    if is_verbose:
+        logger.info(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
+                  f" (using cache: {use_cache}, max_retries: {max_retries})")
+    else:
+        logger.debug(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
+                   f" (using cache: {use_cache}, max_retries: {max_retries})")
     
     # Track token usage
     total_prompt_tokens = 0
@@ -200,8 +209,10 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
         estimated_tokens = prompt_data.get("estimated_tokens", "unknown")
         token_utilization = prompt_data.get("token_utilization", "unknown")
         
-        logger.info(f"Processing chunk {i+1}/{len(prepared_prompts)}: ID {chunk_id}, " +
-                   f"estimated tokens: {estimated_tokens}, utilization: {token_utilization}")
+        # Only log each chunk processing if in verbose mode
+        if is_verbose:
+            logger.info(f"Processing chunk {i+1}/{len(prepared_prompts)}: ID {chunk_id}, " +
+                       f"estimated tokens: {estimated_tokens}, utilization: {token_utilization}")
         
         if isinstance(estimated_tokens, (int, float)):
             total_prompt_tokens += estimated_tokens
@@ -217,12 +228,14 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
                 # Add jitter to retry delay to prevent thundering herd
                 jitter_factor = 1 + (random.random() * 0.5)  # 1.0-1.5x multiplier
                 sleep_time = retry_delay * jitter_factor
-                logger.info(f"Retry attempt {retry_count}/{max_retries} for chunk {chunk_id} after {sleep_time:.2f}s delay")
+                if is_verbose:
+                    logger.info(f"Retry attempt {retry_count}/{max_retries} for chunk {chunk_id} after {sleep_time:.2f}s delay")
                 time.sleep(sleep_time)
             
             try:
                 # Call the LLM with the prepared prompt
-                logger.info(f"Sending chunk {chunk_id} to LLM...")
+                if is_verbose:
+                    logger.info(f"Sending chunk {chunk_id} to LLM...")
                 response = call_llm_func(prompt_data["prompt"], use_cache=use_cache)
                 
                 # Calculate approximate response length (rough estimate)
@@ -240,9 +253,10 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
                     "response": response
                 })
                 
-                logger.info(f"Successfully processed chunk {chunk_id}. " +
-                           f"Response length: ~{response_length} chars, " +
-                           f"~{estimated_response_tokens} tokens")
+                if is_verbose:
+                    logger.info(f"Successfully processed chunk {chunk_id}. " +
+                               f"Response length: ~{response_length} chars, " +
+                               f"~{estimated_response_tokens} tokens")
                 successful_chunks += 1
                 success = True
                 break
@@ -259,14 +273,21 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
                 is_connection_error = any(keyword in error_msg for keyword in connection_keywords)
                 
                 if is_connection_error and retry_count < max_retries:
-                    logger.warning(f"Connection error processing chunk {chunk_id} (attempt {retry_count+1}/{max_retries+1}): {e}")
+                    if is_verbose:
+                        logger.warning(f"Connection error processing chunk {chunk_id} (attempt {retry_count+1}/{max_retries+1}): {e}")
                     retry_count += 1
                 else:
                     # Either not a connection error or max retries reached
                     if retry_count > 0:
-                        logger.error(f"Failed to process chunk {chunk_id} after {retry_count} retries: {e}")
+                        if is_verbose:
+                            logger.error(f"Failed to process chunk {chunk_id} after {retry_count} retries: {e}")
+                        else:
+                            logger.debug(f"Failed to process chunk {chunk_id} after {retry_count} retries: {e}")
                     else:
-                        logger.error(f"Error processing chunk {chunk_id}: {e}")
+                        if is_verbose:
+                            logger.error(f"Error processing chunk {chunk_id}: {e}")
+                        else:
+                            logger.debug(f"Error processing chunk {chunk_id}: {e}")
                     failed_chunks += 1
                     
                     # Add a failure entry
@@ -282,7 +303,8 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
                     break
     
     # Log summary statistics
-    logger.info(f"Batch processing complete: {successful_chunks} successful, {failed_chunks} failed")
+    if is_verbose:
+        logger.info(f"Batch processing complete: {successful_chunks} successful, {failed_chunks} failed")
     logger.info(f"Total estimated input tokens sent to LLM: {total_prompt_tokens}")
     
     return results
