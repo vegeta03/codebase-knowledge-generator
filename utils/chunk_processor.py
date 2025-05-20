@@ -194,10 +194,10 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
     # Log processing info at appropriate level
     if is_verbose:
         logger.info(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
-                  f" (using cache: {use_cache}, max_retries: {max_retries})")
+                      f" (using cache: {use_cache}, max_retries: {max_retries})")
     else:
         logger.debug(f"Starting batch processing of {len(prepared_prompts)} chunks" + 
-                   f" (using cache: {use_cache}, max_retries: {max_retries})")
+               f" (using cache: {use_cache}, max_retries: {max_retries})")
     
     # Track token usage
     total_prompt_tokens = 0
