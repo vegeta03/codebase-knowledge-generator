@@ -107,3 +107,4 @@ uv.lock
 
 docs/*.pdf
 docs/design-cn.md
+.cursor/rules/venv.mdc
