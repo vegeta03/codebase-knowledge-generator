@@ -1,6 +1,7 @@
 import os
 import re
 import json5
+import sys # Add sys import
 from pocketflow import Node, BatchNode
 from utils.crawl_github_files import crawl_github_files
 from utils.call_llm import call_llm, repair_llm_json
@@ -9,6 +10,10 @@ from utils.code_chunking import chunk_codebase
 from utils.chunk_processor import process_code_for_llm, batch_process_chunks, estimate_model_calls
 from prompts import get_identify_abstractions_prompt, get_write_chapter_prompt, get_analyze_relationships_prompt
 import logging
+from utils.code_chunking import estimate_tokens, get_max_input_tokens
+
+# Initialize a module-level logger
+logger = logging.getLogger(__name__)
 
 # Helper to get content for specific file indices
 def get_content_for_indices(files_data, indices):
@@ -387,7 +392,6 @@ class IdentifyAbstractions(Node):
                                         if not indices:
                                             for idx in re.findall(r'\d+', indices_str):
                                                 indices.append(idx)
-                                                
                                         chunk_abstractions.append({
                                             "name": name,
                                             "description": desc_str,
@@ -1655,28 +1659,114 @@ class WriteChapters(BatchNode):
         project_name = item.get("project_name")
         language = item.get("language", "english")
         use_cache = item.get("use_cache", False) # Read use_cache from item
-        print(f"Writing chapter {chapter_num} for: {abstraction_name} using LLM...")
-
-        # Prepare file context string from the map
-        file_context_str = "\n\n".join(
-            f"--- File: {idx_path.split('# ')[1] if '# ' in idx_path else idx_path} ---\n{content}"
-            for idx_path, content in item["related_files_content_map"].items()
+        
+        MAX_ALLOWED_TOKENS = get_max_input_tokens()
+        
+        # --- Static Prompt Components (Estimate their token count) ---
+        # Base prompt template text (excluding dynamic placeholders)
+        # This is a rough estimate; for more accuracy, one could fill placeholders with typical content.
+        base_prompt_text_template = get_write_chapter_prompt(
+            project_name, chapter_num, "{abstraction_name}", "{abstraction_description}", 
+            "{full_chapter_listing}", "{file_context_str}", "{previous_chapters_summary}", 
+            "", "", "", "", "", "", "", "", "", language
         )
+        # Estimate static part by removing placeholders
+        base_prompt_fixed_text = base_prompt_text_template.replace("{abstraction_name}", "") \
+                                        .replace("{abstraction_description}", "") \
+                                        .replace("{full_chapter_listing}", "") \
+                                        .replace("{file_context_str}", "") \
+                                        .replace("{previous_chapters_summary}", "")
+                                        
+        static_prompt_tokens = estimate_tokens(base_prompt_fixed_text)
+        static_prompt_tokens += estimate_tokens(abstraction_name) # Add tokens for current abstraction's name
+        static_prompt_tokens += estimate_tokens(abstraction_description) # Add tokens for current abstraction's description
+        static_prompt_tokens += estimate_tokens(item["full_chapter_listing"]) # Add tokens for the chapter listing
 
-        # Get summary of chapters written *before* this one
-        # Use the temporary instance variable
-        previous_chapters_summary = "\n---\n".join(self.chapters_written_so_far)
+        remaining_budget = MAX_ALLOWED_TOKENS - static_prompt_tokens
+        if remaining_budget <= 0:
+            logger.error(f"Chapter {chapter_num} ({abstraction_name}): Static prompt parts already exceed token limit ({static_prompt_tokens}/{MAX_ALLOWED_TOKENS}). Cannot proceed.")
+            return self.exec_fallback(item, ValueError("Static prompt components exceed token limit."))
 
-        # Add language instruction and context notes only if not English
-        language_instruction = ""
-        concept_details_note = ""
-        structure_note = ""
-        prev_summary_note = ""
-        instruction_lang_note = ""
-        mermaid_lang_note = ""
-        code_comment_note = ""
-        link_lang_note = ""
-        tone_note = ""
+        prev_summary_budget = int(remaining_budget * 0.4)
+        file_context_budget = int(remaining_budget * 0.6)
+        
+        logger.info(f"Chapter {chapter_num} ({abstraction_name}): MaxTk: {MAX_ALLOWED_TOKENS}, StaticTk: {static_prompt_tokens}, BudgetRem: {remaining_budget} (PrevSumBudget: {prev_summary_budget}, FileCtxBudget: {file_context_budget})")
+
+        # --- Adaptive previous_chapters_summary ---
+        adaptive_previous_summary = ""
+        current_summary_tokens = 0
+        if self.chapters_written_so_far:
+            for prev_chapter_content in reversed(self.chapters_written_so_far):
+                lines = prev_chapter_content.split('\n')
+                title = lines[0] if lines else "Previous Chapter"
+                intro_lines = [line for line in lines[1:4] if line.strip() and not line.strip().startswith("#")]
+                brief_intro = "\n".join(intro_lines)
+                
+                chapter_summary_text = f"{title}\n{brief_intro}\n---\n"
+                summary_tokens = estimate_tokens(chapter_summary_text)
+
+                if current_summary_tokens + summary_tokens <= prev_summary_budget:
+                    adaptive_previous_summary = chapter_summary_text + adaptive_previous_summary
+                    current_summary_tokens += summary_tokens
+                else:
+                    title_summary_text = f"{title}\n---\n"
+                    title_tokens = estimate_tokens(title_summary_text)
+                    if current_summary_tokens + title_tokens <= prev_summary_budget:
+                        adaptive_previous_summary = title_summary_text + adaptive_previous_summary
+                        current_summary_tokens += title_tokens
+                    else:
+                        logger.warning(f"Chapter {chapter_num}: Ran out of budget for prev chapter titles. SummaryTk: {current_summary_tokens}")
+                        break
+        
+        if not adaptive_previous_summary:
+            adaptive_previous_summary = "This is the first chapter."
+        
+        logger.info(f"Chapter {chapter_num}: AdaptPrevSumTk: {current_summary_tokens}/{prev_summary_budget}")
+
+        # --- Adaptive file_context_str ---
+        adaptive_file_context_str = ""
+        current_file_tokens = 0
+        raw_file_context_map = item["related_files_content_map"]
+
+        for idx_path, content in raw_file_context_map.items():
+            file_header = f"--- File: {idx_path.split('# ')[1] if '# ' in idx_path else idx_path} ---\n"
+            header_tokens = estimate_tokens(file_header)
+            available_for_content = file_context_budget - current_file_tokens - header_tokens
+            
+            if available_for_content <= 0:
+                logger.warning(f"Chapter {chapter_num}: No budget for file context of {idx_path}. FileTk: {current_file_tokens}")
+                continue # Try next file if current one's header alone exceeds budget for it
+
+            truncated_content = content
+            content_tokens = estimate_tokens(truncated_content)
+
+            if content_tokens > available_for_content:
+                char_to_token_ratio = len(truncated_content) / content_tokens if content_tokens > 0 else 4
+                estimated_chars_for_budget = int(available_for_content * char_to_token_ratio)
+                
+                if estimated_chars_for_budget <=0:
+                    logger.warning(f"Chapter {chapter_num}: File {idx_path} content too large for budget {available_for_content}, cannot truncate.")
+                    continue
+
+                truncated_content = truncated_content[:estimated_chars_for_budget] + "\n... (content truncated)"
+                content_tokens = estimate_tokens(truncated_content) # Re-estimate
+                logger.info(f"Chapter {chapter_num}: Truncated {idx_path} to fit budget. NewTk: {content_tokens}")
+
+            if current_file_tokens + header_tokens + content_tokens <= file_context_budget:
+                adaptive_file_context_str += file_header + truncated_content + "\n\n"
+                current_file_tokens += header_tokens + content_tokens + estimate_tokens("\n\n")
+            else:
+                logger.warning(f"Chapter {chapter_num}: Could not fit {idx_path} (even truncated) into FileCtxBudget. Skipping. FileTk: {current_file_tokens}")
+                continue
+        
+        if not adaptive_file_context_str:
+            adaptive_file_context_str = "No specific code snippets provided for this abstraction, or they were too large for the context window."
+            
+        logger.info(f"Chapter {chapter_num}: AdaptFileCtxTk: {current_file_tokens}/{file_context_budget}")
+        
+        print(f"Writing chapter {chapter_num} for: {abstraction_name} using LLM...")
+        
+        language_instruction, concept_details_note, structure_note, prev_summary_note, instruction_lang_note, mermaid_lang_note, code_comment_note, link_lang_note, tone_note = "", "", "", "", "", "", "", "", ""
         if language.lower() != "english":
             lang_cap = language.capitalize()
             language_instruction = f"IMPORTANT: Write this ENTIRE tutorial chapter in **{lang_cap}**. Some input context (like concept name, description, chapter list, previous summary) might already be in {lang_cap}, but you MUST translate ALL other generated content including explanations, examples, technical terms, and potentially code comments into {lang_cap}. DO NOT use English anywhere except in code syntax, required proper nouns, or when specified. The entire output MUST be in {lang_cap}.\n\n"
@@ -1686,20 +1776,17 @@ class WriteChapters(BatchNode):
             instruction_lang_note = f" (in {lang_cap})"
             mermaid_lang_note = f" (Use {lang_cap} for labels/text if appropriate)"
             code_comment_note = f" (Translate to {lang_cap} if possible, otherwise keep minimal English for clarity)"
-            link_lang_note = (
-                f" (Use the {lang_cap} chapter title from the structure above)"
-            )
+            link_lang_note = f" (Use the {lang_cap} chapter title from the structure above)"
             tone_note = f" (appropriate for {lang_cap} readers)"
 
-        # Use the comprehensive prompt template from prompts.py instead of the hardcoded one
         prompt = get_write_chapter_prompt(
             project_name=project_name,
             chapter_num=chapter_num,
-            abstraction_name=abstraction_name,
-            abstraction_description=abstraction_description,
-            full_chapter_listing=item["full_chapter_listing"],
-            file_context_str=file_context_str if file_context_str else "No specific code snippets provided for this abstraction.",
-            previous_chapters_summary=previous_chapters_summary if previous_chapters_summary else "This is the first chapter.",
+            abstraction_name=abstraction_name, 
+            abstraction_description=abstraction_description, 
+            full_chapter_listing=item["full_chapter_listing"], 
+            file_context_str=adaptive_file_context_str, 
+            previous_chapters_summary=adaptive_previous_summary, 
             language_instruction=language_instruction,
             concept_details_note=concept_details_note,
             structure_note=structure_note,
@@ -1711,29 +1798,42 @@ class WriteChapters(BatchNode):
             tone_note=tone_note,
             language=language
         )
+        
+        final_prompt_tokens = estimate_tokens(prompt)
+        logger.info(f"Chapter {chapter_num}: FinalAssembledPromptTk: {final_prompt_tokens} (MaxAllowed: {MAX_ALLOWED_TOKENS})")
 
-        chapter_content = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0)) # Use cache only if enabled and not retrying
+        if final_prompt_tokens > MAX_ALLOWED_TOKENS:
+            logger.error(f"Chapter {chapter_num} ({abstraction_name}): Assembled prompt ({final_prompt_tokens} tk) EXCEEDS limit ({MAX_ALLOWED_TOKENS} tk) despite adaptive measures. Critical Error.")
+            # Attempt to send a severely truncated prompt or use fallback
+            if current_file_tokens > (MAX_ALLOWED_TOKENS - (static_prompt_tokens + current_summary_tokens)) * 0.5: 
+                 adaptive_file_context_str = "File context was too large and had to be severely truncated to fit model context window."
+                 logger.warning(f"Chapter {chapter_num}: Aggressively truncating file_context_str.")
+                 prompt = get_write_chapter_prompt( 
+                    project_name, chapter_num, abstraction_name, abstraction_description,
+                    item["full_chapter_listing"], adaptive_file_context_str, adaptive_previous_summary,
+                    language_instruction, concept_details_note, structure_note, prev_summary_note,
+                    instruction_lang_note, mermaid_lang_note, code_comment_note, link_lang_note, tone_note, language
+                 )
+                 final_prompt_tokens = estimate_tokens(prompt)
+                 logger.info(f"Chapter {chapter_num}: After aggressive truncation, FinalAssembledPromptTk: {final_prompt_tokens}")
+            
+            if final_prompt_tokens > MAX_ALLOWED_TOKENS:
+                 return self.exec_fallback(item, ValueError(f"Final prompt ({final_prompt_tokens} tk) exceeds limit ({MAX_ALLOWED_TOKENS} tk) even after aggressive truncation."))
 
-        # Clean the chapter content to remove <think></think> blocks
+        chapter_content = call_llm(prompt, use_cache=(use_cache and self.cur_retry == 0))
         chapter_content = self._clean_llm_response(chapter_content)
         
-        # Basic validation/cleanup
-        actual_heading = f"# Chapter {chapter_num}: {abstraction_name}"  # Use potentially translated name
+        actual_heading = f"# Chapter {chapter_num}: {abstraction_name}"
         if not chapter_content.strip().startswith(f"# Chapter {chapter_num}"):
-            # Add heading if missing or incorrect, trying to preserve content
-            lines = chapter_content.strip().split("\n")
-            if lines and lines[0].strip().startswith(
-                "#"
-            ):  # If there's some heading, replace it
+            lines = chapter_content.strip().split('\n')
+            if lines and lines[0].strip().startswith("#"):
                 lines[0] = actual_heading
                 chapter_content = "\n".join(lines)
-            else:  # Otherwise, prepend it
+            else:
                 chapter_content = f"{actual_heading}\n\n{chapter_content}"
 
-        # Add the generated content to our temporary list for the next iteration's context
         self.chapters_written_so_far.append(chapter_content)
-
-        return chapter_content # Return the Markdown string (potentially translated)
+        return chapter_content
 
     def post(self, shared, prep_res, exec_res_list):
         # exec_res_list contains the generated Markdown for each chapter, in order
@@ -1770,65 +1870,22 @@ class WriteChapters(BatchNode):
 
     def exec_fallback(self, item, exc):
         """
-        Provide a fallback chapter when the LLM API fails after all retries.
+        Handle LLM API call failure after all retries.
+        This method will log the error and exit the program.
         
         Args:
             item: The preparation result containing chapter information
             exc: The exception that occurred
-            
-        Returns:
-            A placeholder chapter as fallback content
         """
-        print(f"API call failed after all retries. Creating fallback chapter. Error: {exc}")
-        logger = logging.getLogger("llm_logger")
-        logger.error(f"Creating fallback chapter due to API failure: {exc}")
+        chapter_num = item.get("chapter_num", "Unknown")
+        abstraction_name = item.get("abstraction_details", {}).get("name", "Unknown Abstraction")
         
-        # Extract necessary information to create a basic placeholder chapter
-        chapter_num = item["chapter_num"]
-        abstraction_name = item["abstraction_details"]["name"]
-        abstraction_description = item["abstraction_details"]["description"]
+        error_message = f"FATAL ERROR in WriteChapters: LLM API call failed for Chapter {chapter_num} ('{abstraction_name}') after all retries. Exception: {exc}"
         
-        # Get next chapter info for link
-        next_chapter_link = ""
-        if item.get("next_chapter"):
-            next_name = item["next_chapter"]["name"]
-            next_filename = item["next_chapter"]["filename"]
-            next_chapter_link = f"\n\nNext: [{next_name}]({next_filename})"
-        
-        # Create a simple fallback chapter with basic structure
-        fallback_chapter = f"""# Chapter {chapter_num}: {abstraction_name}
-
-> **Note:** This is a placeholder chapter. The full content couldn't be generated due to a temporary service interruption. Please try regenerating the tutorial later.
-
-## Overview
-
-{abstraction_description}
-
-## Basic Implementation
-
-This section would typically contain implementation details for the {abstraction_name} abstraction.
-
-## Key Concepts
-
-- Concept 1: Would explain core functionality
-- Concept 2: Would detail design patterns used
-- Concept 3: Would cover architectural considerations
-
-## Usage Examples
-
-Examples of how to use this abstraction would be included here.
-
-## Conclusion
-
-The {abstraction_name} abstraction is an important part of the system architecture. It provides essential functionality and integrates with other components.{next_chapter_link}
-
----
-
-Generated by [AI Codebase Knowledge Generator](https://github.com/vegeta03/codebase-knowledge-generator)
-"""
-        
-        print(f"Created fallback chapter for Chapter {chapter_num}: {abstraction_name}")
-        return fallback_chapter
+        logger.error(error_message) # Log to file
+        print(f"\n{error_message}") # Print to console
+        print("Exiting program due to unrecoverable API failure.")
+        sys.exit(1) # Exit the program
 
 class CombineTutorial(Node):
     def prep(self, shared):
