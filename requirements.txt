@@ -1,7 +1,6 @@
 openai
 groq
 pocketflow
-pyyaml
 requests
 gitpython
 python-dotenv
