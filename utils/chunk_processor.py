@@ -19,7 +19,7 @@ from tqdm.asyncio import tqdm_asyncio
 logger = logging.getLogger("chunk_processor")
 
 # Import the code chunking system
-from utils.code_chunking import chunk_codebase, DEFAULT_MODEL_CONTEXT_LENGTH
+from utils.code_chunking import chunk_codebase, chunk_codebase_dynamic, DEFAULT_MODEL_CONTEXT_LENGTH
 
 # Get model context length from environment or default
 MODEL_CONTEXT_LENGTH = int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
@@ -308,6 +308,142 @@ def batch_process_chunks(prepared_prompts: List[Dict[str, Any]],
     logger.info(f"Total estimated input tokens sent to LLM: {total_prompt_tokens}")
     
     return results
+
+
+def process_code_for_llm_dynamic(
+    base_dir: str, 
+    file_paths: List[str], 
+    file_contents: Dict[str, str],
+    prompt_template: str,
+    prompt_variables: Optional[Dict[str, str]] = None,
+    overlap_ratio: float = 0.15
+) -> List[Dict[str, Any]]:
+    """
+    Process codebase files into chunks with DYNAMIC token calculation for STRICT LOSSLESS quality.
+    
+    This function STRICTLY enforces:
+    - 80% of CURRENT_MODEL_CONTEXT_LENGTH for total input (prompt + code)
+    - 20% of CURRENT_MODEL_CONTEXT_LENGTH reserved for model response
+    - Dynamic calculation based on actual prompt template size
+    - LOSSLESS semantic preservation through AST-aware chunking
+    
+    Args:
+        base_dir: Base directory of the codebase
+        file_paths: List of file paths to process
+        file_contents: Dict mapping file paths to their contents
+        prompt_template: Template string where {code} will be replaced with code content
+        prompt_variables: Optional variables for prompt template (excluding 'code')
+        overlap_ratio: Ratio of content to overlap between chunks (default: 0.15)
+        
+    Returns:
+        List of dictionaries with prepared prompts and metadata, optimized for maximum token utilization
+        
+    Raises:
+        ValueError: If prompt template is too large for the model context length
+    """
+    if not prompt_template or "{code}" not in prompt_template:
+        raise ValueError("prompt_template must be provided and contain {code} placeholder")
+    
+    # Re-read environment variable at runtime to ensure latest value
+    current_model_context_length = int(os.getenv("CURRENT_MODEL_CONTEXT_LENGTH", DEFAULT_MODEL_CONTEXT_LENGTH))
+    
+    logger.info(f"=== DYNAMIC TOKEN-AWARE PROCESSING ===")
+    logger.info(f"Model context length: {current_model_context_length} tokens")
+    logger.info(f"Processing {len(file_paths)} files with total size: {sum(len(content) for content in file_contents.values())} characters")
+    
+    # Generate chunks using the DYNAMIC hierarchical AST-aware chunking system
+    logger.info("Starting DYNAMIC hierarchical AST-aware chunking process...")
+    try:
+        results = chunk_codebase_dynamic(
+            base_dir, 
+            file_paths, 
+            file_contents, 
+            prompt_template,
+            prompt_variables,
+            overlap_ratio
+        )
+    except ValueError as e:
+        logger.error(f"Dynamic chunking failed: {e}")
+        raise
+    
+    chunks = results['chunks']
+    statistics = results['statistics']
+    dynamic_token_info = statistics.get('dynamic_token_info', {})
+    
+    logger.info(f"Generated {len(chunks)} chunks using DYNAMIC hierarchical AST-aware chunking")
+    logger.info(f"Prompt overhead: {dynamic_token_info.get('prompt_overhead_tokens', 'unknown')} tokens")
+    logger.info(f"Max code tokens per chunk: {dynamic_token_info.get('max_code_tokens', 'unknown')} tokens")
+    logger.info(f"Average code utilization: {statistics.get('average_code_utilization', 'unknown')}")
+    logger.info(f"Average total utilization: {statistics.get('average_total_utilization', 'unknown')}")
+    
+    # Prepare the final prompts with STRICT validation
+    prepared_prompts = []
+    validation_failures = []
+    
+    for chunk in chunks:
+        # Create the prompt by substituting the code into the template
+        prompt = prompt_template
+        
+        # Substitute all variables including code
+        if prompt_variables:
+            for var_name, var_value in prompt_variables.items():
+                if var_name != 'code':
+                    prompt = prompt.replace(f"{{{var_name}}}", str(var_value))
+        
+        prompt = prompt.replace("{code}", chunk["content"])
+        
+        # Extract utilization info
+        utilization_info = chunk.get('utilization_info', {})
+        
+        # Validate STRICT token compliance
+        if 'max_input_tokens' in utilization_info:
+            total_tokens = chunk['token_count'] + utilization_info['prompt_overhead_tokens']
+            max_allowed = utilization_info['max_input_tokens']
+            
+            if total_tokens > max_allowed:
+                validation_failures.append({
+                    'chunk_id': chunk['chunk_id'],
+                    'total_tokens': total_tokens,
+                    'max_allowed': max_allowed,
+                    'excess': total_tokens - max_allowed
+                })
+                continue  # Skip this chunk
+        
+        prepared_prompts.append({
+            "prompt": prompt,
+            "chunk_id": chunk["chunk_id"],
+            "files": chunk["metadata"]["file_path"].split(';'),
+            "token_count": chunk["token_count"],
+            "utilization_info": utilization_info,
+            "tier": chunk["metadata"]["tier"],
+            "language": chunk["metadata"]["language"],
+            "node_type": chunk["metadata"]["node_type"],
+            "complexity_score": chunk["metadata"]["complexity_score"],
+            "overlap_percentage": overlap_ratio * 100,
+            "estimated_response_tokens": int(current_model_context_length * 0.2),
+            "dynamic_optimization": True,
+            "strict_compliance": True
+        })
+        
+        logger.debug(f"Prepared DYNAMIC prompt for chunk {chunk['chunk_id']} - "
+                   f"Code: {chunk['token_count']} tokens, "
+                   f"Total utilization: {utilization_info.get('total_input_utilization', 'unknown')}")
+    
+    # Report validation failures if any
+    if validation_failures:
+        error_msg = f"STRICT TOKEN VALIDATION FAILED for {len(validation_failures)} chunks during prompt preparation:\n"
+        for failure in validation_failures[:3]:
+            error_msg += f"  Chunk {failure['chunk_id']}: {failure['total_tokens']} > {failure['max_allowed']} (excess: {failure['excess']})\n"
+        if len(validation_failures) > 3:
+            error_msg += f"  ... and {len(validation_failures) - 3} more chunks\n"
+        logger.error(error_msg)
+        raise ValueError(error_msg)
+    
+    logger.info(f"=== DYNAMIC PROCESSING COMPLETE ===")
+    logger.info(f"Prepared {len(prepared_prompts)} STRICTLY COMPLIANT prompts for LLM processing")
+    logger.info(f"All prompts respect the 80/20 token split with LOSSLESS quality guarantee")
+    
+    return prepared_prompts
 
 
 # Example usage

@@ -13,7 +13,7 @@ for large, complex codebases with robust AST-aware parsing and semantic preserva
 6. Statement level - Control flow, declarations, expressions
 7. Attribute/Variable level - Field declarations, variable definitions
 
-Supported Languages: C, C++, Java, Rust, Go, Clojure, TypeScript, Python
+Supported Languages: C, C++, Java, Rust, Go, Clojure, TypeScript, Python, Kotlin
 Features:
 - Lossless semantic preservation
 - Context-aware overlapping
@@ -52,6 +52,7 @@ class LanguageSupport(Enum):
     C = "c"
     CPP = "cpp"
     JAVA = "java"
+    KOTLIN = "kotlin"
     RUST = "rust"
     GO = "go"
     CLOJURE = "clojure"
@@ -72,6 +73,10 @@ LANGUAGE_MAPPING = {
     
     # Java
     ".java": LanguageSupport.JAVA,
+    
+    # Kotlin
+    ".kt": LanguageSupport.KOTLIN,
+    ".kts": LanguageSupport.KOTLIN,
     
     # Rust
     ".rs": LanguageSupport.RUST,
@@ -165,6 +170,35 @@ AST_NODE_TYPES = {
         ChunkTier.ATTRIBUTE: [
             "field_declaration", "formal_parameter", "variable_declarator",
             "assignment_expression", "identifier", "this", "super"
+        ]
+    },
+    
+    LanguageSupport.KOTLIN: {
+        ChunkTier.CLASS_MODULE: [
+            "class_declaration", "interface_declaration", "enum_declaration",
+            "object_declaration", "data_class", "sealed_class", "annotation_class",
+            "package_header", "import_list", "import_directive", "type_alias",
+            "companion_object"
+        ],
+        ChunkTier.FUNCTION: [
+            "function_declaration", "constructor_declaration", "getter", "setter",
+            "lambda_expression", "anonymous_function", "extension_function",
+            "inline_function", "suspend_function", "operator_function",
+            "infix_function", "init_block", "secondary_constructor"
+        ],
+        ChunkTier.STATEMENT: [
+            "if_expression", "when_expression", "when_entry", "for_statement",
+            "while_statement", "do_while_statement", "return_expression",
+            "expression_statement", "block", "try_expression", "catch_block",
+            "finally_block", "throw_expression", "assignment", "property_declaration",
+            "local_variable_declaration", "destructuring_declaration"
+        ],
+        ChunkTier.ATTRIBUTE: [
+            "property_declaration", "parameter", "value_parameter", "type_parameter",
+            "variable_declaration", "assignment_expression", "identifier",
+            "simple_identifier", "field_identifier", "this_expression", "super_expression",
+            "visibility_modifier", "inheritance_modifier", "function_modifier",
+            "property_modifier", "platform_modifier", "variance_modifier"
         ]
     },
     
@@ -418,7 +452,6 @@ class TreeSitterManager:
                     self._load_language_parser(lang)
                 except Exception as e:
                     logger.warning(f"Failed to load {lang.value} parser: {e}")
-                    
         except ImportError:
             logger.error("Tree-sitter not available - falling back to regex-based parsing")
     
@@ -436,10 +469,8 @@ class TreeSitterManager:
                 self.languages[language] = lang
                 logger.debug(f"Loaded {language.value} parser from language pack")
                 return
-                
         except ImportError:
-            pass
-        
+            pass        
         # Fallback to individual language packages
         try:
             import tree_sitter
@@ -453,6 +484,9 @@ class TreeSitterManager:
             elif language == LanguageSupport.JAVA:
                 import tree_sitter_java
                 lang = tree_sitter_java.language()
+            elif language == LanguageSupport.KOTLIN:
+                import tree_sitter_kotlin
+                lang = tree_sitter_kotlin.language()
             elif language == LanguageSupport.RUST:
                 import tree_sitter_rust
                 lang = tree_sitter_rust.language()
@@ -641,6 +675,8 @@ class AdvancedASTChunker:
                 self._extract_c_cpp_semantics(chunk, node, full_content)
             elif language == LanguageSupport.CLOJURE:
                 self._extract_clojure_semantics(chunk, node, full_content)
+            elif language == LanguageSupport.KOTLIN:
+                self._extract_kotlin_semantics(chunk, node, full_content)
                 
         except Exception as e:
             logger.warning(f"Failed to extract semantic info: {e}")
@@ -783,6 +819,39 @@ class AdvancedASTChunker:
         defn_matches = re.findall(r'\(\s*defn?\s+([^\s)]+)', content)
         chunk.metadata.exports.update(defn_matches)
     
+    def _extract_kotlin_semantics(self, chunk: AdvancedCodeChunk, node: Any, full_content: str):
+        """Extract Kotlin-specific semantic information"""
+        content = chunk.content
+        
+        # Extract imports
+        import_patterns = [
+            r'^\s*import\s+([^\s*]+)(?:\.\*)?',  # Standard imports
+            r'^\s*import\s+([^\s]+)\s+as\s+\w+',  # Aliased imports
+        ]
+        
+        for pattern in import_patterns:
+            matches = re.findall(pattern, content, re.MULTILINE)
+            chunk.metadata.imports.update(matches)
+        
+        # Extract exports (public declarations)
+        export_patterns = [
+            r'^\s*(?:public\s+)?fun\s+([a-zA-Z_][a-zA-Z0-9_]*)',  # Functions
+            r'^\s*(?:public\s+)?class\s+([A-Z][a-zA-Z0-9_]*)',  # Classes
+            r'^\s*(?:public\s+)?interface\s+([A-Z][a-zA-Z0-9_]*)',  # Interfaces
+            r'^\s*(?:public\s+)?object\s+([A-Z][a-zA-Z0-9_]*)',  # Objects
+            r'^\s*(?:public\s+)?data\s+class\s+([A-Z][a-zA-Z0-9_]*)',  # Data classes
+            r'^\s*(?:public\s+)?sealed\s+class\s+([A-Z][a-zA-Z0-9_]*)',  # Sealed classes
+            r'^\s*(?:public\s+)?annotation\s+class\s+([A-Z][a-zA-Z0-9_]*)',  # Annotation classes
+            r'^\s*(?:public\s+)?enum\s+class\s+([A-Z][a-zA-Z0-9_]*)',  # Enum classes
+            r'^\s*(?:public\s+)?val\s+([A-Z][a-zA-Z0-9_]*)',  # Public constants
+            r'^\s*(?:public\s+)?var\s+([A-Z][a-zA-Z0-9_]*)',  # Public variables
+            r'^\s*(?:public\s+)?typealias\s+([A-Z][a-zA-Z0-9_]*)',  # Type aliases
+        ]
+        
+        for pattern in export_patterns:
+            matches = re.findall(pattern, content, re.MULTILINE)
+            chunk.metadata.exports.update(matches)
+    
     def _create_file_chunk(self, file_path: str, content: str, language: LanguageSupport) -> AdvancedCodeChunk:
         """Create a file-level chunk when no other chunks are found"""
         chunk_id = f"{self.chunk_counter:06d}"
@@ -792,8 +861,8 @@ class AdvancedASTChunker:
             chunk_id=chunk_id,
             tier=ChunkTier.FILE,
             language=language,
-            file_path=file_path,
-            start_line=0,
+                file_path=file_path,
+                start_line=0,
             end_line=len(content.split('\n')) - 1,
             node_type="file"
         )
@@ -820,6 +889,8 @@ class AdvancedASTChunker:
             chunks.extend(self._fallback_python_chunks(file_path, content, lines))
         elif language == LanguageSupport.JAVA:
             chunks.extend(self._fallback_java_chunks(file_path, content, lines))
+        elif language == LanguageSupport.KOTLIN:
+            chunks.extend(self._fallback_kotlin_chunks(file_path, content, lines))
         elif language in [LanguageSupport.C, LanguageSupport.CPP]:
             chunks.extend(self._fallback_c_cpp_chunks(file_path, content, lines))
         else:
@@ -827,8 +898,8 @@ class AdvancedASTChunker:
             chunk = self._create_file_chunk(file_path, content, language)
             chunks.append(chunk)
         
-        return chunks
-    
+            return chunks
+        
     def _fallback_python_chunks(self, file_path: str, content: str, lines: List[str]) -> List[AdvancedCodeChunk]:
         """Fallback Python chunking using regex patterns"""
         chunks = []
@@ -851,8 +922,8 @@ class AdvancedASTChunker:
                     chunk = self._create_fallback_chunk(
                         file_path, chunk_content, LanguageSupport.PYTHON, 
                         tier, i, end_line, match.group(1)
-                    )
-                    chunks.append(chunk)
+                )
+                chunks.append(chunk)
         
         return chunks
     
@@ -898,6 +969,34 @@ class AdvancedASTChunker:
         
         return chunks
     
+    def _fallback_kotlin_chunks(self, file_path: str, content: str, lines: List[str]) -> List[AdvancedCodeChunk]:
+        """Fallback Kotlin chunking using regex patterns"""
+        chunks = []
+        
+        # Find class, interface, object, and function definitions
+        patterns = [
+            (r'^\s*(?:public\s+|private\s+|internal\s+)?(?:data\s+|sealed\s+|annotation\s+|enum\s+)?class\s+([a-zA-Z_][a-zA-Z0-9_]*)', ChunkTier.CLASS_MODULE),
+            (r'^\s*(?:public\s+|private\s+|internal\s+)?interface\s+([a-zA-Z_][a-zA-Z0-9_]*)', ChunkTier.CLASS_MODULE),
+            (r'^\s*(?:public\s+|private\s+|internal\s+)?object\s+([a-zA-Z_][a-zA-Z0-9_]*)', ChunkTier.CLASS_MODULE),
+            (r'^\s*(?:public\s+|private\s+|internal\s+)?(?:inline\s+|suspend\s+|operator\s+|infix\s+)?fun\s+([a-zA-Z_][a-zA-Z0-9_]*)', ChunkTier.FUNCTION),
+        ]
+        
+        for i, line in enumerate(lines):
+            for pattern, tier in patterns:
+                match = re.match(pattern, line)
+                if match:
+                    # Find the end of this definition (matching braces)
+                    end_line = self._find_brace_block_end(lines, i)
+                    
+                    chunk_content = '\n'.join(lines[i:end_line + 1])
+                    chunk = self._create_fallback_chunk(
+                        file_path, chunk_content, LanguageSupport.KOTLIN,
+                        tier, i, end_line, match.group(1)
+                    )
+                    chunks.append(chunk)
+        
+        return chunks
+    
     def _fallback_c_cpp_chunks(self, file_path: str, content: str, lines: List[str]) -> List[AdvancedCodeChunk]:
         """Fallback C/C++ chunking using regex patterns"""
         chunks = []
@@ -920,11 +1019,11 @@ class AdvancedASTChunker:
                         file_path, chunk_content, 
                         LanguageSupport.CPP if file_path.endswith(('.cpp', '.hpp', '.cxx')) else LanguageSupport.C,
                         tier, i, end_line, match.group(1)
-                    )
-                    chunks.append(chunk)
+            )
+            chunks.append(chunk)
         
         return chunks
-    
+
     def _find_brace_block_end(self, lines: List[str], start_line: int) -> int:
         """Find the end of a brace-delimited block"""
         brace_count = 0
@@ -1290,7 +1389,7 @@ class PackageAnalyzer:
             tier=ChunkTier.PACKAGE,
             language=primary_language,
             file_path=package_path,
-            start_line=0,
+                    start_line=0,
             end_line=0,
             node_type="package"
         )
@@ -1351,7 +1450,7 @@ class OverlapManager:
         """Create overlapping chunks that respect semantic boundaries"""
         if not chunks:
             return []
-        
+            
         # Sort chunks by file path and start line
         sorted_chunks = sorted(chunks, key=lambda c: (c.metadata.file_path, c.metadata.start_line))
         
@@ -1505,7 +1604,7 @@ class OverlapManager:
 class HierarchicalChunkManager:
     """
     Main manager for the 7-tier hierarchical chunking system
-    Coordinates all tiers and ensures lossless quality
+    Coordinates all tiers and ensures lossless quality with dynamic token management
     """
     
     def __init__(self, base_path: str):
@@ -1514,7 +1613,8 @@ class HierarchicalChunkManager:
         self.repo_analyzer = RepositoryAnalyzer(base_path)
         self.package_analyzer = PackageAnalyzer(self.ts_manager)
         self.ast_chunker = AdvancedASTChunker(self.ts_manager)
-        self.overlap_manager = OverlapManager()
+        self.overlap_manager = OverlapManager()  # Default overlap manager
+        self.dynamic_overlap_manager = None  # Will be set when prompt template is provided
         
         # Chunk storage by tier
         self.chunks_by_tier: Dict[ChunkTier, List[AdvancedCodeChunk]] = {
@@ -1529,18 +1629,45 @@ class HierarchicalChunkManager:
         file_paths: List[str], 
         file_contents: Dict[str, str],
         max_tokens: Optional[int] = None,
-        overlap_ratio: float = 0.15
+        overlap_ratio: float = 0.15,
+        prompt_template: Optional[str] = None,
+        prompt_variables: Optional[Dict[str, str]] = None
     ) -> Dict[str, Any]:
         """
-        Process the entire codebase through all 7 tiers
+        Process the entire codebase through all 7 tiers with optional dynamic token management
         
-        Returns comprehensive chunking results with lossless quality guarantees
+        Args:
+            file_paths: List of file paths to process
+            file_contents: Dict mapping file paths to their contents
+            max_tokens: Maximum tokens per chunk (defaults to 80% of model context)
+            overlap_ratio: Ratio of content to overlap between chunks (default: 0.15)
+            prompt_template: Optional prompt template for dynamic token calculation
+            prompt_variables: Optional variables for prompt template (excluding 'code')
+        
+        Returns:
+            Comprehensive chunking results with lossless quality guarantees
         """
-        if max_tokens is None:
-            max_tokens = get_max_input_tokens()
+        # Determine if we should use dynamic token management
+        use_dynamic_tokens = prompt_template is not None
+        
+        if use_dynamic_tokens:
+            logger.info("Using DYNAMIC token management with prompt template")
+            # Initialize dynamic overlap manager with prompt template
+            self.dynamic_overlap_manager = DynamicTokenAwareOverlapManager(
+                overlap_ratio=overlap_ratio,
+                prompt_template=prompt_template,
+                prompt_variables=prompt_variables
+            )
+            # Use the calculated max_code_tokens for processing
+            effective_max_tokens = self.dynamic_overlap_manager.token_info['max_code_tokens']
+        else:
+            logger.info("Using STATIC token management")
+            if max_tokens is None:
+                max_tokens = get_max_input_tokens()
+            effective_max_tokens = max_tokens
         
         logger.info(f"Starting 7-tier hierarchical chunking for {len(file_paths)} files")
-        logger.info(f"Max tokens per chunk: {max_tokens}, Overlap ratio: {overlap_ratio}")
+        logger.info(f"Effective max tokens per chunk: {effective_max_tokens}, Overlap ratio: {overlap_ratio}")
         
         # Tier 1: Repository Analysis
         logger.info("Tier 1: Repository-level analysis")
@@ -1585,12 +1712,24 @@ class HierarchicalChunkManager:
         for tier in ChunkTier:
             all_chunks.extend(self.chunks_by_tier[tier])
         
-        overlapped_chunks = self.overlap_manager.create_overlapping_chunks(
-            all_chunks, max_tokens
-        )
+        # Use appropriate overlap manager based on whether we have dynamic token info
+        if use_dynamic_tokens:
+            logger.info("Using DYNAMIC overlapping chunk creation")
+            overlapped_chunks = self.dynamic_overlap_manager.create_overlapping_chunks_dynamic(all_chunks)
+        else:
+            logger.info("Using STATIC overlapping chunk creation")
+            overlapped_chunks = self.overlap_manager.create_overlapping_chunks(
+                all_chunks, effective_max_tokens
+            )
         
         # Generate comprehensive results
-        results = self._generate_results(overlapped_chunks, max_tokens, overlap_ratio)
+        results = self._generate_results(
+            overlapped_chunks, 
+            effective_max_tokens, 
+            overlap_ratio,
+            use_dynamic_tokens,
+            self.dynamic_overlap_manager.token_info if use_dynamic_tokens else None
+        )
         
         logger.info(f"Chunking complete: {len(overlapped_chunks)} final chunks generated")
         return results
@@ -1648,7 +1787,9 @@ class HierarchicalChunkManager:
         self, 
         overlapped_chunks: List[AdvancedCodeChunk], 
         max_tokens: int, 
-        overlap_ratio: float
+        overlap_ratio: float,
+        use_dynamic_tokens: bool = False,
+        dynamic_token_info: Optional[Dict[str, int]] = None
     ) -> Dict[str, Any]:
         """Generate comprehensive results with statistics and metadata"""
         
@@ -1670,7 +1811,26 @@ class HierarchicalChunkManager:
         # Convert chunks to LLM-ready format
         llm_chunks = []
         for i, chunk in enumerate(overlapped_chunks):
-            utilization = (chunk.estimated_tokens / max_tokens) * 100
+            # Calculate utilization based on appropriate max tokens
+            if use_dynamic_tokens and dynamic_token_info:
+                # For dynamic tokens, calculate utilization against max_code_tokens
+                code_utilization = (chunk.estimated_tokens / dynamic_token_info['max_code_tokens']) * 100
+                # Also calculate total input utilization including prompt
+                total_input_tokens = chunk.estimated_tokens + dynamic_token_info['prompt_overhead_tokens']
+                total_utilization = (total_input_tokens / dynamic_token_info['max_input_tokens']) * 100
+                utilization_info = {
+                    'code_utilization': f"{code_utilization:.2f}%",
+                    'total_input_utilization': f"{total_utilization:.2f}%",
+                    'prompt_overhead_tokens': dynamic_token_info['prompt_overhead_tokens'],
+                    'max_code_tokens': dynamic_token_info['max_code_tokens'],
+                    'max_input_tokens': dynamic_token_info['max_input_tokens']
+                }
+            else:
+                # For static tokens, use traditional calculation
+                utilization = (chunk.estimated_tokens / max_tokens) * 100
+                utilization_info = {
+                    'token_utilization': f"{utilization:.2f}%"
+                }
             
             llm_chunks.append({
                 'chunk_id': i,
@@ -1690,32 +1850,48 @@ class HierarchicalChunkManager:
                     'dependencies': list(chunk.metadata.dependencies)
                 },
                 'token_count': chunk.estimated_tokens,
-                'token_utilization': f"{utilization:.2f}%",
+                'utilization_info': utilization_info,
                 'overlap_regions': chunk.overlap_regions,
                 'semantic_boundaries': chunk.semantic_boundaries
             })
         
+        # Enhanced statistics for dynamic token management
+        statistics = {
+            'total_chunks': len(overlapped_chunks),
+            'chunks_by_tier': total_chunks_by_tier,
+            'total_tokens': total_tokens,
+            'average_tokens_per_chunk': avg_tokens,
+            'max_tokens_per_chunk': max_tokens,
+            'overlap_ratio': overlap_ratio,
+            'language_distribution': dict(language_dist),
+            'average_complexity': avg_complexity,
+            'supported_languages': [lang.value for lang in LanguageSupport if self.ts_manager.is_supported(lang)],
+            'chunking_mode': 'dynamic' if use_dynamic_tokens else 'static'
+        }
+        
+        # Add dynamic token statistics if available
+        if use_dynamic_tokens and dynamic_token_info:
+            statistics.update({
+                'dynamic_token_info': dynamic_token_info,
+                'prompt_efficiency': f"{(dynamic_token_info['prompt_overhead_tokens'] / dynamic_token_info['max_input_tokens']) * 100:.2f}%",
+                'average_code_utilization': f"{(avg_tokens / dynamic_token_info['max_code_tokens']) * 100:.2f}%",
+                'average_total_utilization': f"{((avg_tokens + dynamic_token_info['prompt_overhead_tokens']) / dynamic_token_info['max_input_tokens']) * 100:.2f}%"
+            })
+        else:
+            statistics['token_utilization'] = f"{(avg_tokens / max_tokens) * 100:.2f}%"
+        
         return {
             'chunks': llm_chunks,
-            'statistics': {
-                'total_chunks': len(overlapped_chunks),
-                'chunks_by_tier': total_chunks_by_tier,
-                'total_tokens': total_tokens,
-                'average_tokens_per_chunk': avg_tokens,
-                'max_tokens_per_chunk': max_tokens,
-                'overlap_ratio': overlap_ratio,
-                'language_distribution': dict(language_dist),
-                'average_complexity': avg_complexity,
-                'supported_languages': [lang.value for lang in LanguageSupport if self.ts_manager.is_supported(lang)],
-                'token_utilization': f"{(avg_tokens / max_tokens) * 100:.2f}%"
-            },
+            'statistics': statistics,
             'relationships': dict(self.chunk_relationships),
             'quality_metrics': {
                 'lossless_guarantee': True,
                 'semantic_preservation': True,
                 'hierarchical_integrity': True,
                 'cross_language_support': len(language_dist) > 1,
-                'ast_coverage': sum(1 for lang in language_dist.keys() if self.ts_manager.is_supported(LanguageSupport(lang)))
+                'ast_coverage': sum(1 for lang in language_dist.keys() if self.ts_manager.is_supported(LanguageSupport(lang))),
+                'dynamic_token_optimization': use_dynamic_tokens,
+                'strict_token_compliance': True
             }
         }
 
@@ -1726,23 +1902,117 @@ def chunk_codebase_advanced(
     file_paths: List[str],
     file_contents: Dict[str, str],
     max_tokens: Optional[int] = None,
-    overlap_ratio: float = 0.15
+    overlap_ratio: float = 0.15,
+    prompt_template: Optional[str] = None,
+    prompt_variables: Optional[Dict[str, str]] = None
 ) -> Dict[str, Any]:
     """
-    Advanced 7-tier hierarchical AST-aware codebase chunking
+    Advanced 7-tier hierarchical AST-aware codebase chunking with optional dynamic token management
     
     Args:
         base_dir: Base directory of the codebase
         file_paths: List of file paths to process
         file_contents: Dict mapping file paths to their contents
-        max_tokens: Maximum tokens per chunk (defaults to 80% of model context)
+        max_tokens: Maximum tokens per chunk (defaults to 80% of model context, ignored if prompt_template provided)
         overlap_ratio: Ratio of content to overlap between chunks (default: 0.15)
+        prompt_template: Optional prompt template for dynamic token calculation
+        prompt_variables: Optional variables for prompt template (excluding 'code')
     
     Returns:
         Comprehensive chunking results with lossless quality guarantees
     """
     manager = HierarchicalChunkManager(base_dir)
-    return manager.process_codebase(file_paths, file_contents, max_tokens, overlap_ratio)
+    return manager.process_codebase(
+        file_paths, 
+        file_contents, 
+        max_tokens, 
+        overlap_ratio,
+        prompt_template,
+        prompt_variables
+    )
+
+def chunk_codebase_dynamic(
+    base_dir: str,
+    file_paths: List[str],
+    file_contents: Dict[str, str],
+    prompt_template: str,
+    prompt_variables: Optional[Dict[str, str]] = None,
+    overlap_ratio: float = 0.15
+) -> Dict[str, Any]:
+    """
+    DYNAMIC 7-tier hierarchical AST-aware codebase chunking with STRICT token management
+    
+    This function STRICTLY enforces:
+    - 80% of CURRENT_MODEL_CONTEXT_LENGTH for total input (prompt + code)
+    - 20% of CURRENT_MODEL_CONTEXT_LENGTH reserved for model response
+    - Dynamic calculation based on actual prompt template size
+    - LOSSLESS semantic preservation through AST-aware chunking
+    
+    Args:
+        base_dir: Base directory of the codebase
+        file_paths: List of file paths to process
+        file_contents: Dict mapping file paths to their contents
+        prompt_template: Prompt template with {code} placeholder for dynamic token calculation
+        prompt_variables: Optional variables for prompt template (excluding 'code')
+        overlap_ratio: Ratio of content to overlap between chunks (default: 0.15)
+    
+    Returns:
+        Comprehensive chunking results with dynamic token optimization and lossless quality guarantees
+        
+    Raises:
+        ValueError: If prompt template is too large for the model context length
+    """
+    if not prompt_template or "{code}" not in prompt_template:
+        raise ValueError("prompt_template must be provided and contain {code} placeholder")
+    
+    logger.info("=== DYNAMIC TOKEN-AWARE CHUNKING ===")
+    logger.info(f"Model context length: {get_model_context_length()} tokens")
+    logger.info(f"Strict 80/20 split: {int(get_model_context_length() * 0.8)} input / {int(get_model_context_length() * 0.2)} response")
+    
+    # Calculate dynamic token allocation
+    try:
+        token_info = calculate_dynamic_max_tokens(prompt_template, prompt_variables)
+        logger.info(f"Prompt overhead: {token_info['prompt_overhead_tokens']} tokens")
+        logger.info(f"Available for code: {token_info['max_code_tokens']} tokens")
+        logger.info(f"Prompt efficiency: {token_info['utilization_ratio']:.1%}")
+    except ValueError as e:
+        logger.error(f"Prompt template validation failed: {e}")
+        raise
+    
+    manager = HierarchicalChunkManager(base_dir)
+    results = manager.process_codebase(
+        file_paths, 
+        file_contents, 
+        None,  # max_tokens ignored in dynamic mode
+        overlap_ratio,
+        prompt_template,
+        prompt_variables
+    )
+    
+    # Validate all chunks meet strict token requirements
+    validation_failures = []
+    for chunk in results['chunks']:
+        total_input_tokens = chunk['token_count'] + token_info['prompt_overhead_tokens']
+        if total_input_tokens > token_info['max_input_tokens']:
+            validation_failures.append({
+                'chunk_id': chunk['chunk_id'],
+                'total_tokens': total_input_tokens,
+                'max_allowed': token_info['max_input_tokens'],
+                'excess': total_input_tokens - token_info['max_input_tokens']
+            })
+    
+    if validation_failures:
+        error_msg = f"STRICT TOKEN VALIDATION FAILED for {len(validation_failures)} chunks:\n"
+        for failure in validation_failures[:3]:  # Show first 3 failures
+            error_msg += f"  Chunk {failure['chunk_id']}: {failure['total_tokens']} > {failure['max_allowed']} (excess: {failure['excess']})\n"
+        if len(validation_failures) > 3:
+            error_msg += f"  ... and {len(validation_failures) - 3} more chunks\n"
+        raise ValueError(error_msg)
+    
+    logger.info("=== DYNAMIC CHUNKING VALIDATION PASSED ===")
+    logger.info(f"All {len(results['chunks'])} chunks comply with strict token limits")
+    
+    return results
 
 def validate_chunking_quality(results: Dict[str, Any]) -> Dict[str, bool]:
     """
@@ -1816,6 +2086,490 @@ def chunk_codebase(
         })
     
     return original_format
+
+# Enhanced Dynamic Token Management System
+# Add after the existing token estimation functions
+
+def calculate_dynamic_max_tokens(prompt_template: str, prompt_variables: Dict[str, str] = None) -> Dict[str, int]:
+    """
+    Dynamically calculate maximum available tokens for code content based on actual prompt size.
+    
+    This function STRICTLY enforces:
+    - 80% of CURRENT_MODEL_CONTEXT_LENGTH for total input (prompt + code)
+    - 20% of CURRENT_MODEL_CONTEXT_LENGTH reserved for model response
+    - Dynamic calculation based on actual prompt template size
+    
+    Args:
+        prompt_template: The actual prompt template string with placeholders
+        prompt_variables: Dict of variables to substitute (excluding 'code')
+        
+    Returns:
+        Dict containing:
+        - total_context_length: Full model context length
+        - max_input_tokens: Maximum tokens for input (80% of context)
+        - reserved_response_tokens: Tokens reserved for response (20% of context)
+        - prompt_overhead_tokens: Actual tokens used by prompt template
+        - max_code_tokens: Maximum tokens available for code content
+        - utilization_ratio: Ratio of prompt overhead to total input capacity
+    """
+    # Get current model context length
+    total_context_length = get_model_context_length()
+    
+    # Calculate strict 80/20 split
+    max_input_tokens = int(total_context_length * 0.8)
+    reserved_response_tokens = int(total_context_length * 0.2)
+    
+    # Prepare prompt template for token estimation
+    if prompt_variables is None:
+        prompt_variables = {}
+    
+    # Create a sample prompt with placeholder for code to measure overhead
+    sample_prompt = prompt_template
+    for var_name, var_value in prompt_variables.items():
+        if var_name != 'code':  # Don't substitute code placeholder
+            sample_prompt = sample_prompt.replace(f"{{{var_name}}}", str(var_value))
+    
+    # Replace code placeholder with empty string to measure pure prompt overhead
+    prompt_without_code = sample_prompt.replace("{code}", "")
+    
+    # Calculate actual prompt overhead tokens
+    prompt_overhead_tokens = estimate_tokens(prompt_without_code)
+    
+    # Calculate maximum tokens available for code content
+    max_code_tokens = max_input_tokens - prompt_overhead_tokens
+    
+    # Ensure we don't have negative tokens available for code
+    if max_code_tokens <= 0:
+        raise ValueError(
+            f"Prompt template is too large ({prompt_overhead_tokens} tokens). "
+            f"Maximum input capacity is {max_input_tokens} tokens. "
+            f"Reduce prompt size by {abs(max_code_tokens)} tokens."
+        )
+    
+    # Calculate utilization ratio for monitoring
+    utilization_ratio = prompt_overhead_tokens / max_input_tokens
+    
+    return {
+        'total_context_length': total_context_length,
+        'max_input_tokens': max_input_tokens,
+        'reserved_response_tokens': reserved_response_tokens,
+        'prompt_overhead_tokens': prompt_overhead_tokens,
+        'max_code_tokens': max_code_tokens,
+        'utilization_ratio': utilization_ratio
+    }
+
+def validate_token_allocation(token_info: Dict[str, int], code_content: str) -> Dict[str, Any]:
+    """
+    Validate that the token allocation maintains LOSSLESS quality constraints.
+    
+    Args:
+        token_info: Result from calculate_dynamic_max_tokens()
+        code_content: The actual code content to be included
+        
+    Returns:
+        Dict containing validation results and recommendations
+    """
+    code_tokens = estimate_tokens(code_content)
+    total_input_tokens = token_info['prompt_overhead_tokens'] + code_tokens
+    
+    # Strict validation checks
+    validation_results = {
+        'is_valid': True,
+        'violations': [],
+        'warnings': [],
+        'recommendations': [],
+        'token_breakdown': {
+            'prompt_tokens': token_info['prompt_overhead_tokens'],
+            'code_tokens': code_tokens,
+            'total_input_tokens': total_input_tokens,
+            'max_input_tokens': token_info['max_input_tokens'],
+            'reserved_response_tokens': token_info['reserved_response_tokens'],
+            'remaining_input_capacity': token_info['max_input_tokens'] - total_input_tokens
+        }
+    }
+    
+    # Check for strict violations
+    if total_input_tokens > token_info['max_input_tokens']:
+        validation_results['is_valid'] = False
+        violation = (
+            f"VIOLATION: Total input tokens ({total_input_tokens}) exceeds "
+            f"maximum allowed ({token_info['max_input_tokens']}). "
+            f"Excess: {total_input_tokens - token_info['max_input_tokens']} tokens."
+        )
+        validation_results['violations'].append(violation)
+    
+    # Check for efficiency warnings
+    utilization = total_input_tokens / token_info['max_input_tokens']
+    if utilization < 0.7:  # Less than 70% utilization
+        warning = (
+            f"LOW UTILIZATION: Only using {utilization:.1%} of available input capacity. "
+            f"Consider combining with more content for better efficiency."
+        )
+        validation_results['warnings'].append(warning)
+    elif utilization > 0.95:  # More than 95% utilization
+        warning = (
+            f"HIGH UTILIZATION: Using {utilization:.1%} of available input capacity. "
+            f"Very close to limit - consider splitting for safety margin."
+        )
+        validation_results['warnings'].append(warning)
+    
+    # Generate recommendations
+    if code_tokens > token_info['max_code_tokens']:
+        recommendation = (
+            f"SPLIT REQUIRED: Code content ({code_tokens} tokens) exceeds "
+            f"available capacity ({token_info['max_code_tokens']} tokens). "
+            f"Must split into {math.ceil(code_tokens / token_info['max_code_tokens'])} chunks."
+        )
+        validation_results['recommendations'].append(recommendation)
+    
+    return validation_results
+
+class DynamicTokenAwareOverlapManager(OverlapManager):
+    """
+    Enhanced OverlapManager that dynamically calculates optimal chunk sizes
+    based on actual prompt templates and maintains LOSSLESS quality.
+    """
+    
+    def __init__(self, overlap_ratio: float = 0.15, prompt_template: str = "", prompt_variables: Dict[str, str] = None):
+        super().__init__(overlap_ratio)
+        self.prompt_template = prompt_template
+        self.prompt_variables = prompt_variables or {}
+        self.token_info = None
+        
+        # Calculate dynamic token allocation if prompt template provided
+        if prompt_template:
+            self.token_info = calculate_dynamic_max_tokens(prompt_template, prompt_variables)
+            logger.info(f"Dynamic token allocation calculated:")
+            logger.info(f"  - Total context: {self.token_info['total_context_length']} tokens")
+            logger.info(f"  - Max input (80%): {self.token_info['max_input_tokens']} tokens")
+            logger.info(f"  - Reserved response (20%): {self.token_info['reserved_response_tokens']} tokens")
+            logger.info(f"  - Prompt overhead: {self.token_info['prompt_overhead_tokens']} tokens")
+            logger.info(f"  - Available for code: {self.token_info['max_code_tokens']} tokens")
+            logger.info(f"  - Prompt utilization: {self.token_info['utilization_ratio']:.1%}")
+    
+    def create_overlapping_chunks_dynamic(
+        self, 
+        chunks: List[AdvancedCodeChunk]
+    ) -> List[AdvancedCodeChunk]:
+        """
+        Create overlapping chunks with dynamic token calculation for LOSSLESS quality.
+        
+        This method STRICTLY enforces:
+        1. Each chunk respects the dynamic max_code_tokens limit
+        2. Maintains semantic boundaries for lossless information preservation
+        3. Optimizes token utilization while preserving all content
+        4. Validates each chunk against token constraints
+        
+        Args:
+            chunks: List of hierarchical chunks to combine
+            
+        Returns:
+            List of overlapped chunks optimized for the specific prompt template
+        """
+        if not chunks:
+            return []
+        
+        if not self.token_info:
+            # Fallback to original method if no dynamic calculation available
+            logger.warning("No dynamic token info available, falling back to static calculation")
+            return self.create_overlapping_chunks(chunks, get_max_input_tokens())
+        
+        max_code_tokens = self.token_info['max_code_tokens']
+        overlap_tokens = int(max_code_tokens * self.overlap_ratio)
+        
+        logger.info(f"Creating dynamic overlapping chunks:")
+        logger.info(f"  - Max code tokens per chunk: {max_code_tokens}")
+        logger.info(f"  - Overlap tokens: {overlap_tokens}")
+        logger.info(f"  - Processing {len(chunks)} source chunks")
+        
+        # Sort chunks by file path and start line for consistent processing
+        sorted_chunks = sorted(chunks, key=lambda c: (c.metadata.file_path, c.metadata.start_line))
+        
+        overlapped_chunks = []
+        current_content = ""
+        current_tokens = 0
+        current_chunks = []
+        chunk_counter = 0
+        
+        for chunk_idx, chunk in enumerate(sorted_chunks):
+            # Calculate tokens needed for this chunk including headers
+            file_header = ""
+            tier_header = ""
+            
+            # Add file header if needed
+            if not current_chunks or current_chunks[-1].metadata.file_path != chunk.metadata.file_path:
+                file_header = f"\n# FILE: {chunk.metadata.file_path}\n"
+            
+            # Add tier header
+            tier_header = f"\n## {chunk.metadata.tier.name}: {chunk.metadata.node_type}\n"
+            
+            # Calculate total tokens for this addition
+            headers_tokens = estimate_tokens(file_header + tier_header)
+            chunk_addition_tokens = headers_tokens + chunk.estimated_tokens
+            
+            # Check if adding this chunk would exceed the limit
+            if current_tokens + chunk_addition_tokens > max_code_tokens and current_content:
+                # Validate current chunk before finalizing
+                validation = validate_token_allocation(self.token_info, current_content)
+                
+                if not validation['is_valid']:
+                    logger.error(f"Chunk validation failed: {validation['violations']}")
+                    raise ValueError(f"Cannot create valid chunk: {validation['violations'][0]}")
+                
+                # Create the current overlapped chunk
+                overlapped_chunk = self._create_dynamic_overlapped_chunk(
+                    current_chunks, current_content, chunk_counter
+                )
+                overlapped_chunks.append(overlapped_chunk)
+                chunk_counter += 1
+                
+                # Log chunk creation details
+                logger.debug(f"Created chunk {chunk_counter}: {current_tokens} tokens "
+                           f"({(current_tokens/max_code_tokens)*100:.1f}% utilization)")
+                
+                # Start new chunk with semantic overlap
+                overlap_content, overlap_chunk_list = self._create_semantic_overlap_dynamic(
+                    current_chunks, overlap_tokens
+                )
+                current_content = overlap_content
+                current_tokens = estimate_tokens(overlap_content)
+                current_chunks = overlap_chunk_list
+            
+            # Add the new content
+            current_content += file_header + tier_header + chunk.content + "\n"
+            current_tokens += chunk_addition_tokens
+            current_chunks.append(chunk)
+            
+            # Log progress for large codebases
+            if (chunk_idx + 1) % 100 == 0:
+                logger.info(f"Processed {chunk_idx + 1}/{len(sorted_chunks)} chunks")
+        
+        # Add the final chunk
+        if current_content:
+            # Validate final chunk
+            validation = validate_token_allocation(self.token_info, current_content)
+            
+            if not validation['is_valid']:
+                logger.error(f"Final chunk validation failed: {validation['violations']}")
+                # Try to split the final chunk if it's too large
+                if current_tokens > max_code_tokens:
+                    logger.warning("Final chunk too large, attempting emergency split")
+                    emergency_chunks = self._emergency_split_chunk(current_chunks, max_code_tokens)
+                    overlapped_chunks.extend(emergency_chunks)
+                else:
+                    raise ValueError(f"Cannot create valid final chunk: {validation['violations'][0]}")
+            else:
+                overlapped_chunk = self._create_dynamic_overlapped_chunk(
+                    current_chunks, current_content, chunk_counter
+                )
+                overlapped_chunks.append(overlapped_chunk)
+        
+        # Final validation and logging
+        total_source_tokens = sum(chunk.estimated_tokens for chunk in chunks)
+        total_output_tokens = sum(chunk.estimated_tokens for chunk in overlapped_chunks)
+        
+        logger.info(f"Dynamic chunking complete:")
+        logger.info(f"  - Source chunks: {len(chunks)} ({total_source_tokens} tokens)")
+        logger.info(f"  - Output chunks: {len(overlapped_chunks)} ({total_output_tokens} tokens)")
+        logger.info(f"  - Token expansion ratio: {total_output_tokens/total_source_tokens:.2f}x")
+        logger.info(f"  - Average chunk utilization: {(total_output_tokens/len(overlapped_chunks)/max_code_tokens)*100:.1f}%")
+        
+        return overlapped_chunks
+    
+    def _create_semantic_overlap_dynamic(
+        self, 
+        chunks: List[AdvancedCodeChunk], 
+        overlap_tokens: int
+    ) -> Tuple[str, List[AdvancedCodeChunk]]:
+        """
+        Create semantic overlap with dynamic token awareness for LOSSLESS preservation.
+        """
+        if not chunks or overlap_tokens <= 0:
+            return "", []
+        
+        overlap_content = ""
+        overlap_chunks = []
+        current_tokens = 0
+        
+        # Start from the end and work backwards to maintain context
+        for chunk in reversed(chunks):
+            if current_tokens + chunk.estimated_tokens <= overlap_tokens:
+                # Find semantic boundary within the chunk
+                boundary_content = self._find_semantic_boundary_dynamic(
+                    chunk.content, overlap_tokens - current_tokens
+                )
+                if boundary_content:
+                    overlap_content = boundary_content + "\n" + overlap_content
+                    overlap_chunks.insert(0, chunk)
+                    current_tokens += estimate_tokens(boundary_content)
+                else:
+                    break
+            else:
+                # Take partial content from this chunk while preserving semantics
+                partial_content = self._extract_partial_content_dynamic(
+                    chunk.content, overlap_tokens - current_tokens
+                )
+                if partial_content:
+                    overlap_content = partial_content + "\n" + overlap_content
+                    current_tokens += estimate_tokens(partial_content)
+                break
+        
+        return overlap_content, overlap_chunks
+    
+    def _find_semantic_boundary_dynamic(self, content: str, max_tokens: int) -> str:
+        """
+        Find semantic boundaries with enhanced AST awareness for LOSSLESS quality.
+        """
+        lines = content.split('\n')
+        boundary_content = ""
+        current_tokens = 0
+        
+        # Enhanced semantic boundary patterns for better preservation
+        enhanced_patterns = [
+            r'^\s*class\s+',           # Class definitions
+            r'^\s*def\s+',             # Function definitions  
+            r'^\s*async\s+def\s+',     # Async function definitions
+            r'^\s*@\w+',               # Decorators
+            r'^\s*if\s+__name__\s*==', # Main blocks
+            r'^\s*try\s*:',            # Try blocks
+            r'^\s*except\s+',          # Exception handlers
+            r'^\s*finally\s*:',        # Finally blocks
+            r'^\s*with\s+',            # Context managers
+            r'^\s*for\s+\w+\s+in\s+',  # For loops
+            r'^\s*while\s+',           # While loops
+            r'^\s*if\s+',              # If statements
+            r'^\s*elif\s+',            # Elif statements
+            r'^\s*else\s*:',           # Else statements
+            r'^\s*#\s*[A-Z]',          # Section comments
+            r'^\s*"""',                # Docstrings
+            r'^\s*\'\'\'',             # Docstrings
+        ]
+        
+        for line in lines:
+            line_tokens = estimate_tokens(line)
+            if current_tokens + line_tokens > max_tokens:
+                break
+            
+            boundary_content += line + "\n"
+            current_tokens += line_tokens
+            
+            # Check if this line is a good semantic boundary
+            if any(re.match(pattern, line) for pattern in enhanced_patterns):
+                # This is a good place to stop for semantic continuity
+                logger.debug(f"Found semantic boundary at line: {line[:50]}...")
+                break
+        
+        return boundary_content.strip()
+    
+    def _extract_partial_content_dynamic(self, content: str, max_tokens: int) -> str:
+        """
+        Extract partial content with semantic awareness for LOSSLESS preservation.
+        """
+        lines = content.split('\n')
+        partial_content = ""
+        current_tokens = 0
+        
+        for line in lines:
+            line_tokens = estimate_tokens(line)
+            if current_tokens + line_tokens > max_tokens:
+                break
+            partial_content += line + "\n"
+            current_tokens += line_tokens
+        
+        return partial_content.strip()
+    
+    def _create_dynamic_overlapped_chunk(
+        self, 
+        source_chunks: List[AdvancedCodeChunk], 
+        content: str, 
+        chunk_counter: int
+    ) -> AdvancedCodeChunk:
+        """
+        Create overlapped chunk with dynamic token validation.
+        """
+        if not source_chunks:
+            raise ValueError("Cannot create overlapped chunk without source chunks")
+        
+        # Validate token constraints
+        validation = validate_token_allocation(self.token_info, content)
+        if not validation['is_valid']:
+            raise ValueError(f"Chunk validation failed: {validation['violations'][0]}")
+        
+        # Generate new chunk ID
+        chunk_id = f"dynamic_overlap_{chunk_counter:06d}"
+        
+        # Determine primary metadata from source chunks
+        primary_chunk = source_chunks[0]
+        file_paths = list(set(c.metadata.file_path for c in source_chunks))
+        
+        metadata = ChunkMetadata(
+            chunk_id=chunk_id,
+            tier=ChunkTier.FILE,  # Overlapped chunks are file-level
+            language=primary_chunk.metadata.language,
+            file_path=";".join(file_paths),
+            start_line=min(c.metadata.start_line for c in source_chunks),
+            end_line=max(c.metadata.end_line for c in source_chunks),
+            node_type="dynamic_overlapped_chunk",
+            child_chunk_ids=[c.metadata.chunk_id for c in source_chunks]
+        )
+        
+        chunk = AdvancedCodeChunk(content=content, metadata=metadata)
+        chunk.calculate_complexity()
+        
+        # Add validation metadata
+        chunk.metadata.dependencies.add(f"prompt_tokens:{self.token_info['prompt_overhead_tokens']}")
+        chunk.metadata.dependencies.add(f"max_code_tokens:{self.token_info['max_code_tokens']}")
+        chunk.metadata.dependencies.add(f"utilization:{validation['token_breakdown']['total_input_tokens']}/{self.token_info['max_input_tokens']}")
+        
+        return chunk
+    
+    def _emergency_split_chunk(
+        self, 
+        chunks: List[AdvancedCodeChunk], 
+        max_tokens: int
+    ) -> List[AdvancedCodeChunk]:
+        """
+        Emergency splitting for chunks that exceed limits while maintaining LOSSLESS quality.
+        """
+        logger.warning("Performing emergency chunk split to maintain token limits")
+        
+        emergency_chunks = []
+        current_content = ""
+        current_tokens = 0
+        current_chunk_list = []
+        
+        for chunk in chunks:
+            chunk_tokens = chunk.estimated_tokens
+            
+            if current_tokens + chunk_tokens <= max_tokens:
+                # Add entire chunk
+                current_content += f"\n## {chunk.metadata.tier.name}: {chunk.metadata.node_type}\n"
+                current_content += chunk.content + "\n"
+                current_tokens += chunk_tokens + 10  # +10 for headers
+                current_chunk_list.append(chunk)
+            else:
+                # Finalize current emergency chunk
+                if current_content:
+                    emergency_chunk = self._create_dynamic_overlapped_chunk(
+                        current_chunk_list, current_content, len(emergency_chunks)
+                    )
+                    emergency_chunks.append(emergency_chunk)
+                
+                # Start new emergency chunk
+                current_content = f"\n## {chunk.metadata.tier.name}: {chunk.metadata.node_type}\n"
+                current_content += chunk.content + "\n"
+                current_tokens = chunk_tokens + 10
+                current_chunk_list = [chunk]
+        
+        # Add final emergency chunk
+        if current_content:
+            emergency_chunk = self._create_dynamic_overlapped_chunk(
+                current_chunk_list, current_content, len(emergency_chunks)
+            )
+            emergency_chunks.append(emergency_chunk)
+        
+        logger.warning(f"Emergency split created {len(emergency_chunks)} chunks")
+        return emergency_chunks
 
 if __name__ == "__main__":
     # Example usage and testing

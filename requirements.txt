@@ -15,3 +15,6 @@ black
 colorama
 keyboard
 tree-sitter-languages
+tree-sitter>=0.20.0
+tree-sitter-c-sharp>=0.20.0
+tree-sitter-kotlin>=0.3.0
